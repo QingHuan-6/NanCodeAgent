@@ -1,0 +1,134 @@
+import readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { runAgentLoop } from "../agent/index.js";
+import type { AgentLoopOptions } from "../agent/types.js";
+import type { Config } from "../config.js";
+import type { LlmClient } from "../llm/client.js";
+import type { Session } from "../session/session.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import { createPrinter } from "./printer.js";
+import { helpText, parseSlashCommand, type SlashAction } from "./slash.js";
+
+export interface ReplContext {
+  config: Config;
+  llm: LlmClient;
+  tools: ToolRegistry;
+  session: Session;
+}
+
+/**
+ * Interactive REPL: one long-lived session, each line is a user turn.
+ */
+export async function runRepl(ctx: ReplContext): Promise<void> {
+  printBanner(ctx);
+
+  const rl = readline.createInterface({ input, output, terminal: true });
+  const askPermission = createAskPermission(rl);
+
+  try {
+    while (true) {
+      let line: string;
+      try {
+        line = await rl.question("› ");
+      } catch {
+        // readline closed / EOF
+        break;
+      }
+
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const slash = parseSlashCommand(trimmed);
+      if (slash) {
+        const shouldExit = await handleSlash(slash, ctx);
+        if (shouldExit) break;
+        continue;
+      }
+
+      try {
+        await runAgentLoop(trimmed, buildLoopOptions(ctx, askPermission));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[error] ${message}`);
+      }
+    }
+  } finally {
+    rl.close();
+    console.log("Bye.");
+  }
+}
+
+function buildLoopOptions(
+  ctx: ReplContext,
+  askPermission: AgentLoopOptions["askPermission"],
+): AgentLoopOptions {
+  return {
+    llm: ctx.llm,
+    tools: ctx.tools,
+    session: ctx.session,
+    workspace: ctx.config.workspace,
+    maxTurns: ctx.config.maxTurns,
+    onEvent: createPrinter({ compact: true }),
+    askPermission,
+  };
+}
+
+function createAskPermission(
+  rl: readline.Interface,
+): NonNullable<AgentLoopOptions["askPermission"]> {
+  return async (reason, toolName) => {
+    const answer = (
+      await rl.question(`[ask] Allow ${toolName}? ${reason} [y/N] `)
+    )
+      .trim()
+      .toLowerCase();
+    return answer === "y" || answer === "yes";
+  };
+}
+
+async function handleSlash(
+  slash: SlashAction,
+  ctx: ReplContext,
+): Promise<boolean> {
+  switch (slash.type) {
+    case "exit":
+      return true;
+    case "help":
+      console.log(helpText());
+      return false;
+    case "clear":
+      ctx.session.clear();
+      console.log("Session cleared.");
+      return false;
+    case "status":
+      console.log(
+        [
+          `session:   ${ctx.session.id}`,
+          `messages:  ${ctx.session.messageCount()}`,
+          `model:     ${ctx.config.model}`,
+          `base_url:  ${ctx.config.baseUrl}`,
+          `workspace: ${ctx.config.workspace}`,
+          `max_turns: ${ctx.config.maxTurns}`,
+        ].join("\n"),
+      );
+      return false;
+    case "unknown":
+      console.log(`Unknown command: /${slash.name}. Type /help for commands.`);
+      return false;
+    default:
+      return false;
+  }
+}
+
+function printBanner(ctx: ReplContext): void {
+  console.log(
+    [
+      "",
+      "NanCodeAgent — interactive mode",
+      `model: ${ctx.config.model}`,
+      `workspace: ${ctx.config.workspace}`,
+      "Type a task, or /help. /exit to quit.",
+      "",
+    ].join("\n"),
+  );
+}

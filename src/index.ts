@@ -3,8 +3,8 @@
  * NanCodeAgent CLI entry.
  *
  * Usage:
- *   npm run dev -- "your task here"
- *   npm run dev -- --chat
+ *   npm run dev                  # interactive REPL
+ *   npm run dev -- "one task"    # one-shot
  */
 
 import fs from "node:fs";
@@ -13,6 +13,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "./agent/index.js";
 import { createPrinter } from "./cli/printer.js";
+import { runRepl } from "./cli/repl.js";
 import { loadConfig } from "./config.js";
 import { LlmClient } from "./llm/index.js";
 import { Session } from "./session/session.js";
@@ -21,28 +22,8 @@ import { createDefaultRegistry } from "./tools/index.js";
 async function main(): Promise<void> {
   loadDotEnv();
 
-  const args = process.argv.slice(2);
-  const chatMode = args.includes("--chat");
-  const taskArgs = args.filter((a) => a !== "--chat");
-
-  let task = taskArgs.join(" ").trim();
-  if (!task && chatMode) {
-    const rl = readline.createInterface({ input, output });
-    task = (await rl.question("Task> ")).trim();
-    rl.close();
-  }
-
-  if (!task) {
-    console.log(`NanCodeAgent — scaffold
-
-Usage:
-  npm run dev -- "Create a hello.py that prints hi"
-  npm run dev -- --chat
-
-Copy .env.example to .env and set NAN_API_KEY before running.
-`);
-    process.exit(0);
-  }
+  const args = process.argv.slice(2).filter((a) => a !== "--chat");
+  const oneShot = args.join(" ").trim();
 
   const config = loadConfig();
   const llm = new LlmClient({
@@ -56,7 +37,18 @@ Copy .env.example to .env and set NAN_API_KEY before running.
   const tools = createDefaultRegistry();
   const session = new Session({ persistDir: "sessions" });
 
-  await runAgentLoop(task, {
+  if (!oneShot) {
+    if (!input.isTTY) {
+      console.error(
+        "Interactive mode needs a TTY. Pass a task for one-shot mode:\n  npm run dev -- \"your task\"",
+      );
+      process.exit(1);
+    }
+    await runRepl({ config, llm, tools, session });
+    return;
+  }
+
+  await runAgentLoop(oneShot, {
     llm,
     tools,
     session,
@@ -64,14 +56,18 @@ Copy .env.example to .env and set NAN_API_KEY before running.
     maxTurns: config.maxTurns,
     onEvent: createPrinter(),
     askPermission: async (reason, toolName) => {
+      if (!input.isTTY) return false;
       const rl = readline.createInterface({ input, output });
-      const answer = (
-        await rl.question(`[ask] Allow ${toolName}? ${reason} [y/N] `)
-      )
-        .trim()
-        .toLowerCase();
-      rl.close();
-      return answer === "y" || answer === "yes";
+      try {
+        const answer = (
+          await rl.question(`[ask] Allow ${toolName}? ${reason} [y/N] `)
+        )
+          .trim()
+          .toLowerCase();
+        return answer === "y" || answer === "yes";
+      } finally {
+        rl.close();
+      }
     },
   });
 }

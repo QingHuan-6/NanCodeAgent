@@ -1,18 +1,31 @@
 import type { AgentEvent } from "../agent/events.js";
 
+export interface PrinterOptions {
+  /** Quieter banners for multi-turn REPL. */
+  compact?: boolean;
+}
+
 /** Simple stdout printer for agent events (UI separate from the loop). */
-export function createPrinter(): (event: AgentEvent) => void {
+export function createPrinter(
+  options: PrinterOptions = {},
+): (event: AgentEvent) => void {
+  const compact = options.compact ?? false;
+
   return (event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
-        console.log(
-          event.task
-            ? `\n=== NanCodeAgent ===\nTask: ${event.task}\n`
-            : `\n=== NanCodeAgent (continue) ===\n`,
-        );
+        if (compact) {
+          if (event.task) console.log(`\n→ ${event.task}`);
+        } else {
+          console.log(
+            event.task
+              ? `\n=== NanCodeAgent ===\nTask: ${event.task}\n`
+              : `\n=== NanCodeAgent (continue) ===\n`,
+          );
+        }
         break;
       case "turn_start":
-        console.log(`--- turn ${event.turn} ---`);
+        if (!compact) console.log(`--- turn ${event.turn} ---`);
         break;
       case "assistant_message":
         if (event.content) console.log(event.content);
@@ -21,9 +34,7 @@ export function createPrinter(): (event: AgentEvent) => void {
         }
         break;
       case "tool_execution_start":
-        console.log(
-          `\n> ${event.toolName}(${summarize(event.args)})`,
-        );
+        console.log(`\n> ${event.toolName}(${summarize(event.args)})`);
         break;
       case "tool_execution_end": {
         const preview =
@@ -43,7 +54,13 @@ export function createPrinter(): (event: AgentEvent) => void {
       case "turn_end":
         break;
       case "agent_end":
-        console.log(`\n=== done (${event.reason}, ${event.turns} turns) ===\n`);
+        if (compact) {
+          console.log(`(done: ${event.reason}, ${event.turns} turns)\n`);
+        } else {
+          console.log(
+            `\n=== done (${event.reason}, ${event.turns} turns) ===\n`,
+          );
+        }
         break;
       case "error":
         console.error(`[error] ${event.message}`);

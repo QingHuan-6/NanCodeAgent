@@ -28,6 +28,15 @@ export class Session {
     this.persistLine(message);
   }
 
+  /** Drop conversation history (used by /clear). */
+  clear(): void {
+    this.messages = [];
+  }
+
+  messageCount(): number {
+    return this.messages.length;
+  }
+
   /** Optional: append one JSONL record (Phase 2 can harden resume/load). */
   private persistLine(message: ChatMessage): void {
     if (!this.persistDir) return;
