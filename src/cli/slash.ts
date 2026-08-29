@@ -12,6 +12,8 @@ export type SlashAction =
   | { type: "compact" }
   | { type: "resume"; id?: string }
   | { type: "sessions" }
+  | { type: "plan" }
+  | { type: "agent" }
   | { type: "unknown"; name: string };
 
 export function parseSlashCommand(line: string): SlashAction | null {
@@ -48,6 +50,12 @@ export function parseSlashCommand(line: string): SlashAction | null {
     case "sessions":
     case "session":
       return { type: "sessions" };
+    case "plan":
+      return { type: "plan" };
+    case "agent":
+    case "code":
+    case "act":
+      return { type: "agent" };
     default:
       return { type: "unknown", name: name || "?" };
   }
@@ -57,21 +65,19 @@ export function helpText(): string {
   return [
     "Commands:",
     "  /help       Show this help",
-    "  /status     Session / model / workspace info",
-    "  /setup      Re-run API key / provider setup (--plain or --setup)",
+    "  /status     Session / model / workspace / mode",
+    "  /plan       Read-only plan mode (read/glob/grep + todo_write)",
+    "  /agent      Full agent mode (write/edit/bash enabled)",
+    "  /setup      Re-run API key / provider setup",
     "  /clear      Clear conversation history",
-    "  /compact    Prune older context (keep recent tool-safe blocks)",
-    "  /continue   Resume loop from last user/tool message (no new prompt)",
+    "  /compact    Prune older context",
+    "  /continue   Resume loop from last user/tool message",
     "  /sessions   List saved session ids",
-    "  /resume id  Load a saved session from sessions/",
-    "  /exit       Quit (/quit, /q)",
+    "  /resume id  Load a saved session",
+    "  /exit       Quit",
     "",
-    "While the agent is running (TUI):",
-    "  Enter       Steer — inject after current tools finish",
-    "  Esc         Abort the current run",
-    "  Ctrl+O      Expand / collapse focused tool result",
-    "  Ctrl+P/N    Focus previous / next tool card",
+    "While busy (TUI): Enter steers · Esc aborts · Ctrl+O folds tools",
     "",
-    "Anything else is sent as a new prompt (or steer when busy).",
+    "Anything else is sent as a prompt (or steer when busy).",
   ].join("\n");
 }

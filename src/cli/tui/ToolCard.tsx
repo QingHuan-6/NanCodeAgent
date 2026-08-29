@@ -4,13 +4,19 @@ import Spinner from "ink-spinner";
 import { DiffBlock } from "./DiffBlock.js";
 import { theme } from "./theme.js";
 import {
-  countOutputLines,
-  summarizeOutput,
+  toolDoneLabel,
+  toolRunningLabel,
   type TimelineItem,
 } from "./types.js";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
+/**
+ * Activity-log tool row:
+ *   • Searching for "def " in *.py
+ *   • Searched for "def " in *.py · 15 matches  ▶
+ * Full output only when expanded (Ctrl+O).
+ */
 export function ToolCard({
   card,
   focused,
@@ -18,59 +24,48 @@ export function ToolCard({
   card: ToolItem;
   focused: boolean;
 }): React.ReactElement {
+  const bullet = focused ? "●" : "•";
+
   if (card.status === "running") {
     return (
-      <Box flexDirection="column" marginLeft={1} marginBottom={0}>
-        <Box>
-          <Text color={theme.tool}>
-            {focused ? "● " : "  "}
-            <Spinner type="dots" /> {card.toolName}
-          </Text>
-          <Text dimColor> {card.argsSummary}</Text>
-        </Box>
+      <Box marginLeft={1}>
+        <Text color={theme.tool}>
+          {bullet} <Spinner type="dots" />{" "}
+          {toolRunningLabel(card.toolName, card.subject)}
+        </Text>
       </Box>
     );
   }
 
   const ok = card.status === "done";
   const hasBody = Boolean(card.diff || (card.output && card.output.length > 0));
-  const lines = card.output ? countOutputLines(card.output) : card.diff ? card.diff.lines.length : 0;
-  const foldHint = hasBody ? (card.expanded ? " ▼" : " ▶") : "";
+  const label = toolDoneLabel(
+    card.toolName,
+    card.subject,
+    card.output,
+    !ok,
+  );
 
   return (
-    <Box flexDirection="column" marginLeft={1} marginBottom={0}>
-      <Box>
-        <Text color={ok ? theme.success : theme.error}>
-          {focused ? "● " : "  "}
-          {ok ? "✓" : "✗"} {card.toolName}
-        </Text>
-        <Text dimColor>
-          {" "}
-          {card.argsSummary}
-          {hasBody ? ` · ${lines}L${foldHint}` : ""}
-        </Text>
-      </Box>
+    <Box flexDirection="column" marginLeft={1}>
+      <Text color={ok ? theme.dim : theme.error}>
+        {bullet} {label}
+        {hasBody ? (card.expanded ? "  ▼" : "  ▶") : ""}
+      </Text>
 
       {card.expanded && card.diff ? <DiffBlock diff={card.diff} /> : null}
       {card.expanded && !card.diff && card.output ? (
-        <Box flexDirection="column" marginLeft={4}>
-          {truncateLines(card.output, 60).map((line, i) => (
+        <Box flexDirection="column" marginLeft={3}>
+          {truncateLines(card.output, 40).map((line, i) => (
             <Text
               key={`${card.id}-l-${i}`}
-              color={ok ? undefined : theme.error}
               dimColor={ok}
+              color={ok ? undefined : theme.error}
             >
               {line || " "}
             </Text>
           ))}
         </Box>
-      ) : null}
-
-      {!card.expanded && hasBody && card.output && !card.diff ? (
-        <Text dimColor>
-          {"    "}
-          {summarizeOutput(card.output)}
-        </Text>
       ) : null}
     </Box>
   );

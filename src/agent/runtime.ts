@@ -1,19 +1,24 @@
 /**
- * Stateful wrapper around the agent loop (Pi `Agent` shape).
- * Owns steering / follow-up queues, abort, and default context prune.
+ * Stateful wrapper around the agent loop.
+ * Owns steering / follow-up queues, abort, mode, and default context prune.
  */
 
 import type { Config } from "../config/index.js";
 import type { ChatMessage } from "../llm/types.js";
 import type { LlmClient } from "../llm/client.js";
 import type { Session } from "../session/session.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import {
+  createRegistryForMode,
+  type AgentToolMode,
+  type ToolRegistry,
+} from "../tools/index.js";
 import type { AgentEventHandler } from "./events.js";
 import {
   compactMessagesInPlace,
   createDefaultTransformContext,
 } from "./context.js";
 import { continueAgentLoop, runAgentLoop } from "./loop.js";
+import { buildSystemPrompt } from "./prompt.js";
 import { PendingMessageQueue, type QueueMode } from "./queue.js";
 import type {
   AgentLoopOptions,
@@ -31,6 +36,7 @@ export interface AgentRuntimeOptions {
   toolExecution?: ToolExecutionMode;
   steeringMode?: QueueMode;
   followUpMode?: QueueMode;
+  mode?: AgentToolMode;
   /** Context prune char budget (default 120_000). */
   contextMaxChars?: number;
 }
@@ -43,6 +49,7 @@ export class AgentRuntime {
   onEvent?: AgentEventHandler;
   askPermission?: AgentLoopOptions["askPermission"];
   toolExecution: ToolExecutionMode;
+  mode: AgentToolMode;
 
   private readonly steeringQueue: PendingMessageQueue<ChatMessage>;
   private readonly followUpQueue: PendingMessageQueue<ChatMessage>;
@@ -59,6 +66,7 @@ export class AgentRuntime {
     this.onEvent = options.onEvent;
     this.askPermission = options.askPermission;
     this.toolExecution = options.toolExecution ?? "parallel";
+    this.mode = options.mode ?? "agent";
     this.steeringQueue = new PendingMessageQueue(
       options.steeringMode ?? "one-at-a-time",
     );
@@ -84,14 +92,22 @@ export class AgentRuntime {
     this.followUpQueue.mode = mode;
   }
 
-  /** Inject after the current assistant turn's tools finish (Pi steer). */
+  /** Switch agent ↔ plan (read-only). Refreshes tools + system prompt. */
+  setMode(mode: AgentToolMode): void {
+    if (this.running) {
+      throw new Error("Cannot change mode while the agent is running.");
+    }
+    this.mode = mode;
+    this.tools = createRegistryForMode(mode);
+    this.refreshSystemPrompt();
+  }
+
   steer(text: string): void {
     const content = text.trim();
     if (!content) return;
     this.steeringQueue.enqueue({ role: "user", content });
   }
 
-  /** Queue only when the agent would otherwise stop (Pi followUp). */
   followUp(text: string): void {
     const content = text.trim();
     if (!content) return;
@@ -111,7 +127,6 @@ export class AgentRuntime {
     this.activeAbort?.abort();
   }
 
-  /** Start a new user turn. Throws if already running — use steer/followUp. */
   async prompt(task: string): Promise<AgentLoopResult> {
     if (this.running) {
       throw new Error(
@@ -123,10 +138,6 @@ export class AgentRuntime {
     );
   }
 
-  /**
-   * Continue without a new prompt (Pi continue).
-   * If last message is assistant but queues have items, drain as a new prompt.
-   */
   async continue(): Promise<AgentLoopResult> {
     if (this.running) {
       throw new Error(
@@ -154,7 +165,6 @@ export class AgentRuntime {
     }
   }
 
-  /** Mutate session with an in-place compact (slash /compact). */
   compact(maxChars = 40_000): { removed: number } {
     const { messages, removed } = compactMessagesInPlace(
       this.session.getMessages(),
@@ -162,6 +172,18 @@ export class AgentRuntime {
     );
     this.session.replaceMessages(messages);
     return { removed };
+  }
+
+  private refreshSystemPrompt(): void {
+    const system: ChatMessage = {
+      role: "system",
+      content: buildSystemPrompt({
+        workspace: this.config.workspace,
+        mode: this.mode,
+      }),
+    };
+    const rest = this.session.getMessages().filter((m) => m.role !== "system");
+    this.session.replaceMessages([system, ...rest]);
   }
 
   private async runWithLifecycle(
@@ -188,6 +210,7 @@ export class AgentRuntime {
       maxTurns: this.config.maxTurns,
       stream: true,
       toolExecution: this.toolExecution,
+      mode: this.mode,
       onEvent: this.onEvent,
       askPermission: this.askPermission,
       signal,

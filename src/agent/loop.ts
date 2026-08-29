@@ -172,6 +172,7 @@ async function runTurns(
           const batch = await runToolBatch(toolCalls, {
             tools: options.tools,
             workspace: options.workspace,
+            sessionId: options.session.id,
             onEvent,
             beforeToolCall,
             askPermission: ask,
@@ -338,7 +339,10 @@ function ensureSystemMessage(options: AgentLoopOptions): void {
   if (!hasSystem) {
     options.session.append({
       role: "system",
-      content: buildSystemPrompt({ workspace: options.workspace }),
+      content: buildSystemPrompt({
+        workspace: options.workspace,
+        mode: options.mode ?? "agent",
+      }),
     });
   }
 }

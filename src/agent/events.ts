@@ -3,6 +3,8 @@
  * Loop stays UI-agnostic; TUI and printers subscribe to this stream.
  */
 
+import type { TodoItem } from "../session/todo.js";
+
 export type DiffLineKind = "add" | "remove" | "context" | "header";
 
 export interface ToolUiDiffLine {
@@ -17,6 +19,9 @@ export interface ToolUiDiff {
 
 export interface ToolUiMeta {
   diff?: ToolUiDiff;
+  /** Session todo list after todo_write. */
+  todos?: TodoItem[];
+  todoSummary?: string;
 }
 
 export type AgentEvent =

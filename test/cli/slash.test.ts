@@ -12,7 +12,7 @@ describe("slash commands", () => {
     expect(parseSlashCommand("  /q  ")).toEqual({ type: "exit" });
   });
 
-  it("parses help / clear / status / setup / continue / compact / resume", () => {
+  it("parses help / clear / status / setup / continue / compact / resume / plan", () => {
     expect(parseSlashCommand("/help")).toEqual({ type: "help" });
     expect(parseSlashCommand("/clear")).toEqual({ type: "clear" });
     expect(parseSlashCommand("/status")).toEqual({ type: "status" });
@@ -20,6 +20,8 @@ describe("slash commands", () => {
     expect(parseSlashCommand("/config")).toEqual({ type: "setup" });
     expect(parseSlashCommand("/continue")).toEqual({ type: "continue" });
     expect(parseSlashCommand("/compact")).toEqual({ type: "compact" });
+    expect(parseSlashCommand("/plan")).toEqual({ type: "plan" });
+    expect(parseSlashCommand("/agent")).toEqual({ type: "agent" });
     expect(parseSlashCommand("/resume abc")).toEqual({
       type: "resume",
       id: "abc",
@@ -42,6 +44,7 @@ describe("slash commands", () => {
     expect(text).toContain("/clear");
     expect(text).toContain("/continue");
     expect(text).toContain("/compact");
-    expect(text).toContain("Steer");
+    expect(text).toContain("/plan");
+    expect(text).toContain("steer");
   });
 });

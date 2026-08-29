@@ -18,6 +18,8 @@ export interface ToolBatchItem {
 export interface RunToolBatchOptions {
   tools: ToolRegistry;
   workspace: string;
+  /** Passed into ToolContext for session-scoped tools (todo_write). */
+  sessionId?: string;
   onEvent: AgentEventHandler;
   beforeToolCall: (
     toolName: string,
@@ -156,6 +158,7 @@ async function executeOne(
   throwIfAborted(options.signal);
   const result = await options.tools.run(call.name, call.args, {
     workspace: options.workspace,
+    sessionId: options.sessionId,
   });
   const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
   const item: ToolBatchItem = { call, result, isError };

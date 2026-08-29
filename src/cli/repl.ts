@@ -107,6 +107,7 @@ async function handleSlash(
         [
           `session:   ${ctx.session.id}`,
           `messages:  ${ctx.session.messageCount()}`,
+          `mode:      ${runtime.mode}`,
           `model:     ${ctx.config.model}`,
           `base_url:  ${ctx.config.baseUrl}`,
           `workspace: ${ctx.config.workspace}`,
@@ -142,6 +143,24 @@ async function handleSlash(
       console.log(`Compacted (removed ~${removed} messages).`);
       return false;
     }
+    case "plan":
+      try {
+        runtime.setMode("plan");
+        ctx.tools = runtime.tools;
+        console.log("Plan mode: read_file / glob / grep / todo_write (no writes).");
+      } catch (err) {
+        console.error(`[error] ${err instanceof Error ? err.message : err}`);
+      }
+      return false;
+    case "agent":
+      try {
+        runtime.setMode("agent");
+        ctx.tools = runtime.tools;
+        console.log("Agent mode: full tools enabled.");
+      } catch (err) {
+        console.error(`[error] ${err instanceof Error ? err.message : err}`);
+      }
+      return false;
     case "sessions": {
       const ids = Session.listSessionIds("sessions");
       console.log(

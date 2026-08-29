@@ -6,13 +6,19 @@ import type { AgentEvent } from "../../agent/events.js";
 import type { Config } from "../../config/index.js";
 import type { LlmClient } from "../../llm/client.js";
 import { Session } from "../../session/session.js";
+import {
+  clearTodos,
+  loadPersistedTodos,
+  summarizeTodos,
+  type TodoItem,
+} from "../../session/todo.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { helpText, parseSlashCommand } from "../slash.js";
 import { theme } from "./theme.js";
 import { ToolCard } from "./ToolCard.js";
 import {
   nextId,
-  summarizeArgs,
+  toolSubject,
   type PermissionRequest,
   type StatusState,
   type TimelineItem,
@@ -46,7 +52,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     {
       id: nextId("sys"),
       kind: "system",
-      text: "prompt · steer while busy · Esc abort · ctrl+o fold tool · /help",
+      text: "prompt · steer while busy · Esc abort · ctrl+o expand tool · /help",
     },
   ]);
   const [focusedToolId, setFocusedToolId] = useState<string | null>(null);
@@ -55,6 +61,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
 
   const streamBufRef = useRef("");
   const runtimeRef = useRef<AgentRuntime | null>(null);
@@ -95,18 +102,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           ).trimEnd();
           streamBufRef.current = "";
           setStreamBuffer("");
+          // Only show real assistant prose in the timeline (no "(calling N tools)").
           if (finalText) {
             pushItem({
               id: nextId("asst"),
               kind: "assistant",
               text: finalText,
-            });
-          } else if (event.toolCallCount > 0) {
-            // Model jumped straight to tools — show a slim cue in-order.
-            pushItem({
-              id: nextId("asst"),
-              kind: "assistant",
-              text: `(calling ${event.toolCallCount} tool${event.toolCallCount > 1 ? "s" : ""})`,
             });
           }
           if (event.toolCallCount > 0) {
@@ -126,13 +127,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             kind: "tool",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            argsSummary: summarizeArgs(event.args),
+            subject: toolSubject(event.toolName, event.args),
             status: "running",
             expanded: false,
           });
           break;
         }
         case "tool_execution_end":
+          if (event.ui?.todos) {
+            setTodos(event.ui.todos);
+          }
           setTimeline((prev) => {
             const idx = findToolIndex(prev, event.toolCallId, event.toolName);
             if (idx < 0) {
@@ -145,7 +149,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   kind: "tool" as const,
                   toolCallId: event.toolCallId,
                   toolName: event.toolName,
-                  argsSummary: "",
+                  subject: event.toolName,
                   status: (event.isError ? "error" : "done") as "error" | "done",
                   output: event.output,
                   diff: event.ui?.diff,
@@ -337,6 +341,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           return true;
         case "clear":
           session.clear();
+          clearTodos(session.id);
+          setTodos([]);
           setFocusedToolId(null);
           setTimeline([
             {
@@ -353,11 +359,45 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             text: [
               `session:   ${session.id}`,
               `messages:  ${session.messageCount()}`,
+              `mode:      ${runtime.mode}`,
+              `todos:     ${todos.length ? summarizeTodos(todos) : "(none)"}`,
               `model:     ${config.model}`,
               `workspace: ${config.workspace}`,
               `running:   ${runtime.isRunning}`,
             ].join("\n"),
           });
+          return true;
+        case "plan":
+          try {
+            runtime.setMode("plan");
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: "Plan mode on — read_file / glob / grep / todo_write.",
+            });
+          } catch (err) {
+            pushItem({
+              id: nextId("err"),
+              kind: "error",
+              text: err instanceof Error ? err.message : String(err),
+            });
+          }
+          return true;
+        case "agent":
+          try {
+            runtime.setMode("agent");
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: "Agent mode on — full tools enabled.",
+            });
+          } catch (err) {
+            pushItem({
+              id: nextId("err"),
+              kind: "error",
+              text: err instanceof Error ? err.message : String(err),
+            });
+          }
           return true;
         case "setup":
           pushItem({
@@ -413,10 +453,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             });
             setSession(loaded);
             runtimeRef.current = null;
+            const restored =
+              loadPersistedTodos(config.workspace, loaded.id) ?? [];
+            setTodos(restored);
             pushItem({
               id: nextId("sys"),
               kind: "system",
-              text: `Loaded ${loaded.id} (${loaded.messageCount()} msgs). /continue to resume.`,
+              text: `Loaded ${loaded.id} (${loaded.messageCount()} msgs)${
+                restored.length ? ` · ${summarizeTodos(restored)}` : ""
+              }. /continue to resume.`,
             });
           } catch (err) {
             pushItem({
@@ -536,7 +581,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       {streamBuffer ? (
         <Box flexDirection="column" marginBottom={1}>
           <Text color={theme.brand} bold>
-            assistant
+            Assistant
           </Text>
           <Text color={theme.assistant}>{streamBuffer}</Text>
           <Text dimColor>▊</Text>
@@ -544,6 +589,37 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ) : null}
 
       <Box marginTop={1} flexDirection="column">
+        {todos.length > 0 ? (
+          <Box flexDirection="column" marginBottom={1} marginLeft={1}>
+            <Text dimColor>● {summarizeTodos(todos)}</Text>
+            {todos.slice(0, 8).map((t) => (
+              <Text
+                key={t.id}
+                dimColor={t.status === "completed" || t.status === "cancelled"}
+                color={
+                  t.status === "in_progress"
+                    ? theme.tool
+                    : t.status === "completed"
+                      ? theme.success
+                      : undefined
+                }
+              >
+                {"  "}
+                {t.status === "completed"
+                  ? "✔"
+                  : t.status === "in_progress"
+                    ? "◼"
+                    : t.status === "cancelled"
+                      ? "–"
+                      : "◻"}{" "}
+                {t.content}
+              </Text>
+            ))}
+            {todos.length > 8 ? (
+              <Text dimColor>  … +{todos.length - 8} more</Text>
+            ) : null}
+          </Box>
+        ) : null}
         {permission ? (
           <Box
             flexDirection="column"
@@ -606,7 +682,7 @@ function TimelineRow({
       return (
         <Box flexDirection="column" marginBottom={1}>
           <Text color={theme.user} bold>
-            you
+            You
           </Text>
           <Text>{item.text}</Text>
         </Box>
@@ -615,11 +691,9 @@ function TimelineRow({
       return (
         <Box flexDirection="column" marginBottom={1}>
           <Text color={theme.brand} bold>
-            assistant
+            Assistant
           </Text>
-          <Text dimColor={item.text.startsWith("(calling")}>
-            {item.text}
-          </Text>
+          <Text>{item.text}</Text>
         </Box>
       );
     case "tool":

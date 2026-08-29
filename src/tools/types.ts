@@ -3,6 +3,8 @@ import type { OpenAIToolDefinition, ToolParameterSchema } from "../llm/types.js"
 
 export interface ToolContext {
   workspace: string;
+  /** Session id for todo_write and other session-scoped tools. */
+  sessionId?: string;
 }
 
 export interface ToolResult {

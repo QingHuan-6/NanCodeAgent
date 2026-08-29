@@ -6,7 +6,7 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive **Ink TUI** (stream, spinner, diffs, mid-run **steer**) + `--plain` REPL + parallel tools + context prune + session resume.
+Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + tool-output spill + session resume.
 
 ## Setup
 
@@ -46,9 +46,13 @@ npm run dev -- --plain
 npm run dev -- "Create a hello.py that prints hi"
 ```
 
-Inside TUI / REPL: `/help` `/status` `/clear` `/compact` `/continue` `/sessions` `/resume` `/exit`  
+Inside TUI / REPL: `/help` `/status` `/plan` `/agent` `/clear` `/compact` `/continue` `/sessions` `/resume` `/exit`  
 While busy in TUI: **Enter steers** (injects after current tools); Esc aborts.  
 Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
+
+**Modes:** `/plan` = read-only (read/glob/grep + todo_write). `/agent` = full tools (write/edit/bash + todo_write).  
+Multi-step work: the model can call `todo_write` to keep a live checklist (shown above the prompt).  
+Large tool output is saved under `.nan/tool-output/` with a short summary returned to the model.
 
 ### Use from any folder (global)
 
@@ -85,14 +89,15 @@ src/
   index.ts          CLI entry (setup / TUI / plain / one-shot)
   config/           runtime config + ~/.nan-agent .env
   llm/              OpenAI-compatible client (+ SSE stream)
-  tools/            read/write/edit/bash (+ UI diffs)
-  agent/            loop, prompt, events (incl. message_delta)
-  session/          message history
+  tools/            read/write/edit/bash/glob/grep/todo_write (+ spill)
+  agent/            loop, runtime, prompt, events
+  session/          message history + resume + todos
   permissions.ts    workspace gate
-  cli/              printer, REPL, TUI (Ink), slash, setup
+  cli/              printer, REPL, TUI, slash, setup
 test/               Vitest suite
 ```
 
+Not in scope for this harness (product-scale): MCP, LSP, web fetch, notebooks, skills, sub-agents.
 ## Secrets
 
 API keys live in environment, project `.env`, or `~/.nan-agent/.env` — never in the git repo.

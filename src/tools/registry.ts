@@ -1,5 +1,11 @@
 import type { OpenAIToolDefinition } from "../llm/types.js";
-import { toOpenAITool, type ToolContext, type ToolDefinition, type ToolResult } from "./types.js";
+import {
+  toOpenAITool,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolResult,
+} from "./types.js";
+import { spillToolOutputIfNeeded } from "./spill.js";
 
 /**
  * Registers tools and exposes OpenAI-compatible schemas + local execution.
@@ -12,6 +18,10 @@ export class ToolRegistry {
       throw new Error(`Tool already registered: ${tool.name}`);
     }
     this.tools.set(tool.name, tool);
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
   }
 
   list(): ToolDefinition[] {
@@ -32,7 +42,11 @@ export class ToolRegistry {
       return { output: `Unknown tool: ${name}` };
     }
     try {
-      return await tool.execute(args, ctx);
+      const result = await tool.execute(args, ctx);
+      return {
+        ...result,
+        output: spillToolOutputIfNeeded(result.output, ctx, name),
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { output: `Tool "${name}" failed: ${message}` };

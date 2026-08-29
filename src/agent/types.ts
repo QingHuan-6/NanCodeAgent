@@ -55,8 +55,10 @@ export interface AgentLoopOptions {
   doomLoopThreshold?: number;
   /** Prefer streamChat when available (default true). */
   stream?: boolean;
-  /** Default parallel (Pi). */
+  /** Default parallel. */
   toolExecution?: ToolExecutionMode;
+  /** agent = full tools; plan = read-only. */
+  mode?: "agent" | "plan";
   onEvent?: AgentEventHandler;
   signal?: AbortSignal;
   beforeToolCall?: (

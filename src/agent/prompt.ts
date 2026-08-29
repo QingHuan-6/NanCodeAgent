@@ -9,15 +9,20 @@ export interface SystemPromptOptions {
   workspace: string;
   /** Extra static instructions appended after the role section. */
   extraInstructions?: string;
+  /** agent = full tools; plan = read-only exploration. */
+  mode?: "agent" | "plan";
 }
 
 /**
- * Build system prompt: static role + dynamic runtime context
- * (inspired by claw-code `prompt.rs` assembly, simplified).
+ * Build system prompt: static role + dynamic runtime context.
  */
 export function buildSystemPrompt(options: SystemPromptOptions): string {
   const workspace = path.resolve(options.workspace);
-  const sections: string[] = [buildRoleSection(), buildEnvironmentSection(workspace)];
+  const mode = options.mode ?? "agent";
+  const sections: string[] = [
+    buildRoleSection(mode),
+    buildEnvironmentSection(workspace),
+  ];
 
   const projectInstructions = loadProjectInstructions(workspace);
   if (projectInstructions) {
@@ -28,19 +33,32 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     sections.push(`# Additional instructions\n\n${options.extraInstructions.trim()}`);
   }
 
-  sections.push(buildToolPolicySection());
+  sections.push(buildToolPolicySection(mode));
   return sections.join("\n\n");
 }
 
-function buildRoleSection(): string {
+function buildRoleSection(mode: "agent" | "plan"): string {
+  if (mode === "plan") {
+    return [
+      "# Role",
+      "",
+      "You are NanCodeAgent in **plan mode** (read-only).",
+      "Explore the workspace with read_file / glob / grep; use todo_write for multi-step plans.",
+      "Do NOT modify files or run shell commands — those tools are unavailable.",
+      "Produce a clear implementation plan: goals, files to touch, steps, risks.",
+      "When the plan is ready, tell the user to switch to agent mode (/agent) to execute.",
+    ].join("\n");
+  }
   return [
     "# Role",
     "",
     "You are NanCodeAgent, a local coding agent running on the user's machine.",
     "Complete programming tasks by calling tools to inspect and modify the workspace.",
     "Prefer small, correct edits. Prefer reading before writing. Verify with shell commands when useful.",
+    "Use glob/grep to find files instead of guessing paths.",
     "Never invent file contents — call read_file when unsure.",
     "If a tool fails, read the error, adjust, and retry with a different approach.",
+    "If tool output was saved to .nan/tool-output/, use read_file to inspect the rest.",
   ].join("\n");
 }
 
@@ -62,12 +80,24 @@ function buildEnvironmentSection(workspace: string): string {
   return lines.join("\n");
 }
 
-function buildToolPolicySection(): string {
+function buildToolPolicySection(mode: "agent" | "plan"): string {
+  if (mode === "plan") {
+    return [
+      "# Tool policy (plan mode)",
+      "",
+      "- Allowed: read_file, glob, grep, todo_write.",
+      "- Forbidden: write_file, edit_file, bash, and any workspace mutation.",
+      "- For multi-step plans, use todo_write to list concrete steps before finishing.",
+      "- Stay inside the workspace.",
+      "- End with a concrete plan the user can approve before switching to /agent.",
+    ].join("\n");
+  }
   return [
     "# Tool policy",
     "",
     "- Stay inside the workspace unless the user explicitly asks otherwise.",
     "- Avoid destructive shell commands (rm -rf, format, etc.).",
+    "- For complex multi-step tasks (≥3 steps), call todo_write first, keep one item in_progress, and mark items completed as you go.",
     "- When editing, keep changes focused on the task.",
     "- When done, give a short summary of what changed.",
   ].join("\n");
