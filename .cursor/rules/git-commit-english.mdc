@@ -1,0 +1,20 @@
+---
+description: Use English for all git commit messages
+alwaysApply: true
+---
+
+# Git Commit Language
+
+- Write all git commit messages in English.
+- Prefer concise, imperative mood (e.g. "Add feature", "Fix bug", "Update docs").
+- Focus the message on why the change was made when helpful; keep it to 1–2 short sentences.
+
+```text
+# ❌ BAD
+添加登录功能
+修复空指针问题
+
+# ✅ GOOD
+Add user login flow
+Fix null pointer when parsing empty response
+```

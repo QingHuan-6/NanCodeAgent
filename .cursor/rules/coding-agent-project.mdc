@@ -1,0 +1,39 @@
+---
+description: NanCodeAgent push-recommendation project constraints for coding agent
+alwaysApply: true
+---
+
+# NanCodeAgent — Project Constraints
+
+Software-engineering recommendation project: **independently design and implement a coding agent** (simplified Claude Code / Codex / OpenCode / DeepSeek Harness style).
+
+**Deadline:** 2026-09-02 24:00 Beijing time (i.e. 2026-09-03 00:00).
+
+## Goal
+
+Agent talks to an LLM, **autonomously** reads/writes files and runs commands to finish programming tasks the user assigns.
+
+## Hard bans
+
+- Do **not** wrap an existing agent product UI.
+- Do **not** use agent frameworks/SDKs: LangChain, LlamaIndex, OpenAI Agents SDK, Claude Agent SDK, AutoGen, CrewAI, etc.
+- Do **not** rely on hosted server-side code execution or file tools (Code Interpreter, Files API, etc.).
+
+## Allowed
+
+- Model vendor API client libraries, OpenAI-compatible gateways, native **tool calling**.
+- Any model, any language; AI-assisted coding is OK — own every design decision.
+
+## Must implement yourself (local harness)
+
+- Conversation history & context management
+- Tool definitions & **local** execution
+- Model output parsing
+- Agent loop & stop conditions
+- Error handling
+
+## Secrets
+
+- API keys only via env vars or **non-committed** config.
+- Never put credentials in the repo, README, docs, demos, or videos.
+- If leaked: revoke and rotate immediately.
