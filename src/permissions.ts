@@ -14,8 +14,7 @@ export interface PermissionResult {
 }
 
 /**
- * Pre-tool gate (Pi-style beforeToolCall).
- * Phase 1 will harden path checks and dangerous-command heuristics.
+ * Pre-tool gate before local execution.
  */
 export function checkPermission(req: PermissionRequest): PermissionResult {
   const workspaceRoot = path.resolve(req.workspace);
@@ -39,14 +38,15 @@ export function checkPermission(req: PermissionRequest): PermissionResult {
   return { decision: "allow" };
 }
 
-function resolveUnderWorkspace(
+export function resolveUnderWorkspace(
   workspaceRoot: string,
   filePath: string,
 ): { ok: true; absolute: string } | { ok: false; reason: string } {
+  const root = path.resolve(workspaceRoot);
   const absolute = path.isAbsolute(filePath)
     ? path.resolve(filePath)
-    : path.resolve(workspaceRoot, filePath);
-  const relative = path.relative(workspaceRoot, absolute);
+    : path.resolve(root, filePath);
+  const relative = path.relative(root, absolute);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     return {
       ok: false,
@@ -63,7 +63,7 @@ function looksDangerous(command: string): boolean {
     /del\s+\/[sq]/i,
     /format\s+/i,
     /shutdown/i,
-    /:\(\)\s*\{\s*:\|:&\s*\};:/, // fork bomb
+    /:\(\)\s*\{\s*:\|:&\s*\};:/,
   ];
   return patterns.some((re) => re.test(lower));
 }

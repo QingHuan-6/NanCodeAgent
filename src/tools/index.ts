@@ -4,7 +4,7 @@ import { readFileTool } from "./read_file.js";
 import { ToolRegistry } from "./registry.js";
 import { writeFileTool } from "./write_file.js";
 
-/** Build the default MVP tool set (stubs until Phase 1 implements them). */
+/** Default MVP tools: read / write / edit / bash. */
 export function createDefaultRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
@@ -16,3 +16,8 @@ export function createDefaultRegistry(): ToolRegistry {
 
 export { ToolRegistry } from "./registry.js";
 export type { ToolContext, ToolDefinition, ToolResult } from "./types.js";
+export {
+  MAX_READ_BYTES,
+  MAX_WRITE_BYTES,
+  resolveWorkspacePath,
+} from "./helpers.js";

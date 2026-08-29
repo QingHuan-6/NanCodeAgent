@@ -2,11 +2,11 @@
 
 A minimal **self-hosted coding agent** harness: local tools + OpenAI-compatible tool calling.
 
-Inspired by Pi / Claude Code / Codex architecture notes in `docs/`, without agent frameworks (no LangChain, Agents SDK, etc.).
+No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, and LLM client are implemented in-repo.
 
 ## Status
 
-**Phase 0–1 (partial).** Agent loop and OpenAI-compatible LLM client are in place. The four MVP tools are still **stubs** — implement next for real coding tasks.
+**Phase 1 tools ready.** Agent loop, LLM client, and local tools (`read_file` / `write_file` / `edit_file` / `bash`) are implemented. Next: end-to-end demos and optional compact / search tools.
 
 ## Setup
 
@@ -30,7 +30,7 @@ src/
   index.ts          CLI entry
   config.ts         env config
   llm/              OpenAI-compatible client (retry, stream, errors)
-  tools/            registry + read/write/edit/bash (stubs)
+  tools/            registry + read/write/edit/bash (local)
   agent/            loop, prompt, events, doom-loop, tool-runner
   session/          message history (+ optional JSONL)
   permissions.ts    workspace path gate + dangerous cmd ask
