@@ -14,7 +14,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "./agent/index.js";
 import { createPrinter } from "./cli/printer.js";
 import { loadConfig } from "./config.js";
-import { LlmClient } from "./llm/client.js";
+import { LlmClient } from "./llm/index.js";
 import { Session } from "./session/session.js";
 import { createDefaultRegistry } from "./tools/index.js";
 
@@ -49,6 +49,9 @@ Copy .env.example to .env and set NAN_API_KEY before running.
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
+    temperature: config.temperature,
+    maxRetries: config.maxRetries,
+    timeoutMs: config.timeoutMs,
   });
   const tools = createDefaultRegistry();
   const session = new Session({ persistDir: "sessions" });

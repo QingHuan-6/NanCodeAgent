@@ -87,6 +87,7 @@ async function runTurns(
       const assistant = await options.llm.chat(
         contextMessages,
         options.tools.toOpenAITools(),
+        { signal: options.signal },
       );
       options.session.append(assistant);
 

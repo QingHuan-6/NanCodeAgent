@@ -1,14 +1,22 @@
 /**
  * Agent module shared types.
- * Shaped after Pi AgentLoopConfig + claw-code TurnSummary — kept minimal for MVP.
  */
 
 import type { LlmClient } from "../llm/client.js";
-import type { ChatMessage } from "../llm/types.js";
+import type { ChatMessage, OpenAIToolDefinition } from "../llm/types.js";
 import type { Session } from "../session/session.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolResult } from "../tools/types.js";
 import type { AgentEventHandler } from "./events.js";
+
+/** Minimal LLM surface required by the agent loop. */
+export interface LlmChatPort {
+  chat(
+    messages: ChatMessage[],
+    tools?: OpenAIToolDefinition[],
+    options?: { signal?: AbortSignal },
+  ): Promise<ChatMessage>;
+}
 
 /** Why the agent loop stopped. */
 export type StopReason =
@@ -21,42 +29,30 @@ export type StopReason =
   | "should_stop";
 
 export interface AgentLoopOptions {
-  llm: LlmClient;
+  llm: LlmChatPort | LlmClient;
   tools: ToolRegistry;
   session: Session;
   workspace: string;
   maxTurns: number;
-  /** How many identical tool+args in a row before stopping (OpenCode-style doom loop). */
+  /** How many identical tool+args in a row before stopping. */
   doomLoopThreshold?: number;
   onEvent?: AgentEventHandler;
   signal?: AbortSignal;
-  /**
-   * Permission / pre-tool gate (Pi `beforeToolCall`).
-   * Default: use `checkPermission` from permissions.ts.
-   */
   beforeToolCall?: (
     toolName: string,
     args: Record<string, unknown>,
   ) => Promise<BeforeToolCallResult> | BeforeToolCallResult;
-  /** When beforeToolCall returns ask — CLI confirms. Default: deny. */
   askPermission?: (reason: string, toolName: string) => Promise<boolean>;
-  /**
-   * Run after a completed turn (assistant + tools). Return true to exit
-   * before the next LLM call (Pi `shouldStopAfterTurn`).
-   */
   shouldStopAfterTurn?: (ctx: AfterTurnContext) => Promise<boolean> | boolean;
-  /**
-   * Optional context transform before each LLM call (Pi `transformContext`).
-   * Default: identity.
-   */
-  transformContext?: (messages: ChatMessage[]) => Promise<ChatMessage[]> | ChatMessage[];
+  transformContext?: (
+    messages: ChatMessage[],
+  ) => Promise<ChatMessage[]> | ChatMessage[];
 }
 
 export interface BeforeToolCallResult {
-  /** allow | deny | ask */
   decision: "allow" | "deny" | "ask";
   reason?: string;
-  /** Participate in batch early-termination (Pi). */
+  /** If set on every tool in a batch, skip the next LLM follow-up. */
   terminate?: boolean;
 }
 
@@ -78,7 +74,6 @@ export interface ParsedToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
-  /** Stable signature for doom-loop detection. */
   signature: string;
   parseError?: string;
 }

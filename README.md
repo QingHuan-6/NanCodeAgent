@@ -6,7 +6,7 @@ Inspired by Pi / Claude Code / Codex architecture notes in `docs/`, without agen
 
 ## Status
 
-**Scaffold (Phase 0).** Agent loop, LLM client, tool registry, permissions hooks, and CLI are wired. The four MVP tools are **stubs** — implement in Phase 1.
+**Phase 0–1 (partial).** Agent loop and OpenAI-compatible LLM client are in place. The four MVP tools are still **stubs** — implement next for real coding tasks.
 
 ## Setup
 
@@ -29,7 +29,7 @@ npm run build && npm start -- "your programming task"
 src/
   index.ts          CLI entry
   config.ts         env config
-  llm/              OpenAI-compatible client + types
+  llm/              OpenAI-compatible client (retry, stream, errors)
   tools/            registry + read/write/edit/bash (stubs)
   agent/            loop, prompt, events, doom-loop, tool-runner
   session/          message history (+ optional JSONL)
@@ -37,7 +37,7 @@ src/
   cli/printer.ts    event → stdout (UI separate from loop)
 ```
 
-Local study clones live in `refs/` (gitignored). See `refs/study/NOTES.md` after cloning.
+Local study clones live in `refs/` (gitignored).
 
 ## Secrets
 
