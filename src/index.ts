@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { runAgentLoop } from "./agent/loop.js";
+import { runAgentLoop } from "./agent/index.js";
 import { createPrinter } from "./cli/printer.js";
 import { loadConfig } from "./config.js";
 import { LlmClient } from "./llm/client.js";

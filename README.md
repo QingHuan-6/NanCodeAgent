@@ -31,11 +31,13 @@ src/
   config.ts         env config
   llm/              OpenAI-compatible client + types
   tools/            registry + read/write/edit/bash (stubs)
-  agent/            loop, system prompt, events
+  agent/            loop, prompt, events, doom-loop, tool-runner
   session/          message history (+ optional JSONL)
   permissions.ts    workspace path gate + dangerous cmd ask
   cli/printer.ts    event → stdout (UI separate from loop)
 ```
+
+Local study clones live in `refs/` (gitignored). See `refs/study/NOTES.md` after cloning.
 
 ## Secrets
 

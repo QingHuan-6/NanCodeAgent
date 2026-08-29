@@ -1,34 +1,49 @@
 import type { AgentEvent } from "../agent/events.js";
 
-/** Simple stdout printer for agent events (keeps UI out of the loop). */
+/** Simple stdout printer for agent events (UI separate from the loop). */
 export function createPrinter(): (event: AgentEvent) => void {
   return (event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
-        console.log(`\n=== NanCodeAgent ===\nTask: ${event.task}\n`);
+        console.log(
+          event.task
+            ? `\n=== NanCodeAgent ===\nTask: ${event.task}\n`
+            : `\n=== NanCodeAgent (continue) ===\n`,
+        );
         break;
       case "turn_start":
         console.log(`--- turn ${event.turn} ---`);
         break;
-      case "assistant_text":
-        console.log(event.text);
+      case "assistant_message":
+        if (event.content) console.log(event.content);
+        if (event.toolCallCount > 0) {
+          console.log(`(requesting ${event.toolCallCount} tool call(s))`);
+        }
         break;
-      case "tool_start":
-        console.log(`\n> tool ${event.name}(${summarize(event.args)})`);
+      case "tool_execution_start":
+        console.log(
+          `\n> ${event.toolName}(${summarize(event.args)})`,
+        );
         break;
-      case "tool_end": {
+      case "tool_execution_end": {
         const preview =
-          event.output.length > 500 ? `${event.output.slice(0, 500)}…` : event.output;
-        console.log(preview);
+          event.output.length > 500
+            ? `${event.output.slice(0, 500)}…`
+            : event.output;
+        console.log(event.isError ? `[error] ${preview}` : preview);
         break;
       }
       case "permission":
         if (event.decision !== "allow") {
-          console.log(`[permission ${event.decision}] ${event.name}: ${event.reason ?? ""}`);
+          console.log(
+            `[permission ${event.decision}] ${event.toolName}: ${event.reason ?? ""}`,
+          );
         }
         break;
+      case "turn_end":
+        break;
       case "agent_end":
-        console.log(`\n=== done (${event.reason}) ===\n`);
+        console.log(`\n=== done (${event.reason}, ${event.turns} turns) ===\n`);
         break;
       case "error":
         console.error(`[error] ${event.message}`);
