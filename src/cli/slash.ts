@@ -7,6 +7,7 @@ export type SlashAction =
   | { type: "help" }
   | { type: "clear" }
   | { type: "status" }
+  | { type: "setup" }
   | { type: "unknown"; name: string };
 
 export function parseSlashCommand(line: string): SlashAction | null {
@@ -29,6 +30,9 @@ export function parseSlashCommand(line: string): SlashAction | null {
       return { type: "clear" };
     case "status":
       return { type: "status" };
+    case "setup":
+    case "config":
+      return { type: "setup" };
     default:
       return { type: "unknown", name: name || "?" };
   }
@@ -39,6 +43,7 @@ export function helpText(): string {
     "Commands:",
     "  /help     Show this help",
     "  /status   Session / model / workspace info",
+    "  /setup    Re-run API key / provider setup",
     "  /clear    Clear conversation history (keep going in REPL)",
     "  /exit     Quit (/quit, /q)",
     "",

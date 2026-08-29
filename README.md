@@ -6,15 +6,68 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive REPL + agent loop + LLM client + local tools (`read_file` / `write_file` / `edit_file` / `bash`).
+Interactive **Ink TUI** (stream + spinner + diffs) + `--plain` REPL + first-run API setup + agent loop + local tools + Vitest.
 
 ## Setup
 
 ```bash
+git clone <your-repo-url> NanCodeAgent
+cd NanCodeAgent
 npm install
-copy .env.example .env
-# edit .env — set NAN_API_KEY (and optionally NAN_BASE_URL / NAN_MODEL)
+npm run dev
 ```
+
+First launch asks for provider / API key / model, then saves to:
+
+```text
+~/.nan-agent/.env
+```
+
+After that you can run from **any folder** (workspace = current directory), as long as Node can find the CLI (see below). Re-run setup anytime:
+
+```bash
+npm run dev -- --setup
+# or inside REPL:
+/setup
+```
+
+Optional: still support project-local `.env` (overrides user config for that repo). Never commit secrets.
+
+## Run
+
+```bash
+# Interactive TUI — stream, spinner, file diffs
+npm run dev
+
+# Classic readline REPL
+npm run dev -- --plain
+
+# One-shot (colored streaming printer)
+npm run dev -- "Create a hello.py that prints hi"
+```
+
+Inside TUI / REPL: `/help` `/status` `/clear` `/exit`  
+Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
+
+### Use from any folder (global)
+
+```bash
+cd NanCodeAgent
+npm run link:global
+```
+
+Then in any project:
+
+```bash
+cd D:\some-other-project
+nan-agent              # REPL — workspace = this folder
+nan-agent --setup      # change API key / model
+nan-agent "fix hello"  # one-shot
+```
+
+API config is read from `%USERPROFILE%\.nan-agent\.env` (set on first run).
+
+Unlink later: `npm unlink -g nan-code-agent`
 
 ## Test
 
@@ -24,38 +77,21 @@ npm test
 
 Layout: dedicated `test/` (tools, agent, llm, cli), Vitest, no live API required.
 
-## Run
-
-```bash
-# Interactive (Claude Code–style): keep asking in one session
-npm run dev
-
-# One-shot
-npm run dev -- "Create a hello.py that prints hi"
-```
-
-Inside the REPL:
-
-- Type a task and press Enter
-- `/help` `/status` `/clear` `/exit`
-
 ## Layout
 
 ```
 src/
-  index.ts          CLI entry (REPL or one-shot)
-  config.ts         env config
-  llm/              OpenAI-compatible client (retry, stream, errors)
-  tools/            registry + read/write/edit/bash (local)
-  agent/            loop, prompt, events, doom-loop, tool-runner
-  session/          message history (+ optional JSONL)
-  permissions.ts    workspace path gate + dangerous cmd ask
-  cli/              printer, REPL, slash commands
-test/               Vitest suite (tools / agent / llm / cli)
+  index.ts          CLI entry (setup / TUI / plain / one-shot)
+  config/           runtime config + ~/.nan-agent .env
+  llm/              OpenAI-compatible client (+ SSE stream)
+  tools/            read/write/edit/bash (+ UI diffs)
+  agent/            loop, prompt, events (incl. message_delta)
+  session/          message history
+  permissions.ts    workspace gate
+  cli/              printer, REPL, TUI (Ink), slash, setup
+test/               Vitest suite
 ```
-
-Local study clones live in `refs/` (gitignored).
 
 ## Secrets
 
-API keys only via environment / `.env` (gitignored). Never commit credentials.
+API keys live in environment, project `.env`, or `~/.nan-agent/.env` — never in the git repo.

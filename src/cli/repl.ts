@@ -2,11 +2,12 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "../agent/index.js";
 import type { AgentLoopOptions } from "../agent/types.js";
-import type { Config } from "../config.js";
-import type { LlmClient } from "../llm/client.js";
+import { loadConfig, type Config } from "../config/index.js";
+import { LlmClient } from "../llm/client.js";
 import type { Session } from "../session/session.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { createPrinter } from "./printer.js";
+import { runSetupWizard } from "./setup.js";
 import { helpText, parseSlashCommand, type SlashAction } from "./slash.js";
 
 export interface ReplContext {
@@ -31,7 +32,6 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
       try {
         line = await rl.question("› ");
       } catch {
-        // readline closed / EOF
         break;
       }
 
@@ -40,7 +40,7 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
 
       const slash = parseSlashCommand(trimmed);
       if (slash) {
-        const shouldExit = await handleSlash(slash, ctx);
+        const shouldExit = await handleSlash(slash, ctx, rl);
         if (shouldExit) break;
         continue;
       }
@@ -68,6 +68,7 @@ function buildLoopOptions(
     session: ctx.session,
     workspace: ctx.config.workspace,
     maxTurns: ctx.config.maxTurns,
+    stream: true,
     onEvent: createPrinter({ compact: true }),
     askPermission,
   };
@@ -89,6 +90,7 @@ function createAskPermission(
 async function handleSlash(
   slash: SlashAction,
   ctx: ReplContext,
+  rl: readline.Interface,
 ): Promise<boolean> {
   switch (slash.type) {
     case "exit":
@@ -112,6 +114,20 @@ async function handleSlash(
         ].join("\n"),
       );
       return false;
+    case "setup": {
+      await runSetupWizard({ rl });
+      ctx.config = loadConfig(ctx.config.workspace);
+      ctx.llm = new LlmClient({
+        apiKey: ctx.config.apiKey,
+        baseUrl: ctx.config.baseUrl,
+        model: ctx.config.model,
+        temperature: ctx.config.temperature,
+        maxRetries: ctx.config.maxRetries,
+        timeoutMs: ctx.config.timeoutMs,
+      });
+      console.log(`Using model ${ctx.config.model} @ ${ctx.config.baseUrl}`);
+      return false;
+    }
     case "unknown":
       console.log(`Unknown command: /${slash.name}. Type /help for commands.`);
       return false;

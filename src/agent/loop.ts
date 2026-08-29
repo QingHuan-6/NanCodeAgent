@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../llm/types.js";
+import type { ChatMessage, OpenAIToolDefinition } from "../llm/types.js";
 import { DoomLoopGuard } from "./doom-loop.js";
 import { emitEvent, noopEvents } from "./events.js";
 import { buildSystemPrompt } from "./prompt.js";
@@ -11,16 +11,14 @@ import {
 import type {
   AgentLoopOptions,
   AgentLoopResult,
+  LlmChatPort,
   StopReason,
 } from "./types.js";
 
 /**
  * Core harness loop — messages → LLM → tools → repeat.
  *
- * Inspired by:
- * - Pi `runLoop` (turn boundaries, terminate-all, shouldStopAfterTurn, AbortSignal)
- * - claw-code `ConversationRuntime::run_turn` (max iterations, tool error feedback)
- * - OpenCode session loop (max steps / doom-loop guard)
+ * Turn = one LLM call + optional tool batch. UI listens via onEvent only.
  */
 export async function runAgentLoop(
   task: string,
@@ -36,8 +34,8 @@ export async function runAgentLoop(
 }
 
 /**
- * Continue from existing session without a new user message
- * (Pi `agentLoopContinue`). Last message must be user or tool.
+ * Continue from existing session without a new user message.
+ * Last message must be user or tool.
  */
 export async function continueAgentLoop(
   options: AgentLoopOptions,
@@ -84,10 +82,13 @@ async function runTurns(
         ? await options.transformContext(options.session.getMessages())
         : options.session.getMessages();
 
-      const assistant = await options.llm.chat(
+      const assistant = await callLlm(
+        options.llm,
         contextMessages,
         options.tools.toOpenAITools(),
-        { signal: options.signal },
+        onEvent,
+        options.signal,
+        options.stream !== false,
       );
       options.session.append(assistant);
 
@@ -116,7 +117,6 @@ async function runTurns(
         });
       }
 
-      // Doom-loop: observe each call signature before executing
       for (const raw of toolCalls) {
         const parsed = parseToolCall(raw);
         if (doom.observe(parsed)) {
@@ -198,6 +198,33 @@ async function runTurns(
       error: message,
     });
   }
+}
+
+async function callLlm(
+  llm: LlmChatPort,
+  messages: ChatMessage[],
+  tools: OpenAIToolDefinition[],
+  onEvent: NonNullable<AgentLoopOptions["onEvent"]>,
+  signal: AbortSignal | undefined,
+  preferStream: boolean,
+): Promise<ChatMessage> {
+  if (preferStream && typeof llm.streamChat === "function") {
+    await emitEvent(onEvent, { type: "message_start" });
+    let final: ChatMessage | undefined;
+    for await (const event of llm.streamChat(messages, { tools, signal })) {
+      if (event.type === "text_delta" && event.text) {
+        await emitEvent(onEvent, { type: "message_delta", text: event.text });
+      } else if (event.type === "done") {
+        final = event.result.message;
+      }
+    }
+    if (!final) {
+      throw new Error("LLM stream ended without a final message");
+    }
+    return final;
+  }
+
+  return llm.chat(messages, tools, { signal });
 }
 
 function ensureSystemMessage(options: AgentLoopOptions): void {

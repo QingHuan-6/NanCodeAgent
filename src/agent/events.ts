@@ -1,7 +1,23 @@
 /**
  * Agent events for UI / logging.
- * Aligned with Pi's event vocabulary; streaming deltas deferred.
+ * Loop stays UI-agnostic; TUI and printers subscribe to this stream.
  */
+
+export type DiffLineKind = "add" | "remove" | "context" | "header";
+
+export interface ToolUiDiffLine {
+  kind: DiffLineKind;
+  text: string;
+}
+
+export interface ToolUiDiff {
+  path: string;
+  lines: ToolUiDiffLine[];
+}
+
+export interface ToolUiMeta {
+  diff?: ToolUiDiff;
+}
 
 export type AgentEvent =
   | { type: "agent_start"; task?: string }
@@ -13,6 +29,8 @@ export type AgentEvent =
       hasToolCalls: boolean;
       toolCount: number;
     }
+  | { type: "message_start" }
+  | { type: "message_delta"; text: string }
   | { type: "assistant_message"; content: string | null; toolCallCount: number }
   | {
       type: "tool_execution_start";
@@ -26,6 +44,7 @@ export type AgentEvent =
       toolName: string;
       output: string;
       isError: boolean;
+      ui?: ToolUiMeta;
     }
   | {
       type: "permission";

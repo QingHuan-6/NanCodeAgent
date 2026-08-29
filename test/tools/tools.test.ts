@@ -28,6 +28,7 @@ describe("tools", () => {
         c,
       );
       expect(written.output).toContain("created");
+      expect(written.ui?.diff?.lines.some((l) => l.kind === "add")).toBe(true);
       expect(fs.existsSync(path.join(dir, "src/hello.txt"))).toBe(true);
 
       const read = await tools.run(

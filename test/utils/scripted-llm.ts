@@ -34,6 +34,36 @@ export class ScriptedLlm implements LlmChatPort {
   }
 }
 
+/** Like ScriptedLlm but exposes streamChat that yields text deltas. */
+export class StreamingScriptedLlm extends ScriptedLlm {
+  async *streamChat(
+    messages: ChatMessage[],
+    options: { tools?: OpenAIToolDefinition[]; signal?: AbortSignal } = {},
+  ): AsyncGenerator<
+    import("../../src/llm/types.js").StreamEvent,
+    import("../../src/llm/types.js").ChatResult,
+    undefined
+  > {
+    const message = await this.chat(messages, options.tools);
+    yield { type: "start", id: "scripted" };
+    if (message.content) {
+      // Emit in small chunks so message_delta is exercised
+      const text = message.content;
+      const mid = Math.max(1, Math.floor(text.length / 2));
+      yield { type: "text_delta", text: text.slice(0, mid) };
+      if (mid < text.length) {
+        yield { type: "text_delta", text: text.slice(mid) };
+      }
+    }
+    const result = {
+      message,
+      finishReason: message.tool_calls?.length ? ("tool_calls" as const) : ("stop" as const),
+    };
+    yield { type: "done", result };
+    return result;
+  }
+}
+
 export function assistantText(text: string): ChatMessage {
   return { role: "assistant", content: text };
 }

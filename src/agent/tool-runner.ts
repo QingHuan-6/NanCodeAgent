@@ -86,7 +86,7 @@ export async function runToolBatch(
     const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
     if (result.terminate) terminateVotes += 1;
     items.push({ call, result, isError });
-    await emitToolEnd(options.onEvent, call, result.output, isError);
+    await emitToolEnd(options.onEvent, call, result.output, isError, result.ui);
   }
 
   const terminateBatch =
@@ -158,6 +158,7 @@ async function emitToolEnd(
   call: ParsedToolCall,
   output: string,
   isError: boolean,
+  ui?: ToolResult["ui"],
 ): Promise<void> {
   await emitEvent(onEvent, {
     type: "tool_execution_end",
@@ -165,6 +166,7 @@ async function emitToolEnd(
     toolName: call.name,
     output,
     isError,
+    ...(ui ? { ui } : {}),
   });
 }
 

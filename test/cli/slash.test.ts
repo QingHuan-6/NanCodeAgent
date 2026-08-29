@@ -12,10 +12,12 @@ describe("slash commands", () => {
     expect(parseSlashCommand("  /q  ")).toEqual({ type: "exit" });
   });
 
-  it("parses help / clear / status", () => {
+  it("parses help / clear / status / setup", () => {
     expect(parseSlashCommand("/help")).toEqual({ type: "help" });
     expect(parseSlashCommand("/clear")).toEqual({ type: "clear" });
     expect(parseSlashCommand("/status")).toEqual({ type: "status" });
+    expect(parseSlashCommand("/setup")).toEqual({ type: "setup" });
+    expect(parseSlashCommand("/config")).toEqual({ type: "setup" });
   });
 
   it("flags unknown commands", () => {
@@ -28,6 +30,7 @@ describe("slash commands", () => {
   it("includes core commands in help text", () => {
     const text = helpText();
     expect(text).toContain("/help");
+    expect(text).toContain("/setup");
     expect(text).toContain("/exit");
     expect(text).toContain("/clear");
   });

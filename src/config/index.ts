@@ -1,7 +1,8 @@
 /**
- * Load config from environment variables.
- * Secrets must never be hardcoded — use .env (gitignored) or the shell env.
+ * Load runtime config after env files / setup wizard have run.
  */
+
+import { hasApiKeyConfigured } from "./env.js";
 
 export interface Config {
   apiKey: string;
@@ -14,16 +15,6 @@ export interface Config {
   timeoutMs: number;
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(
-      `Missing required environment variable ${name}. Copy .env.example to .env and set it.`,
-    );
-  }
-  return value;
-}
-
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
@@ -32,8 +23,14 @@ function intEnv(name: string, fallback: number): number {
 }
 
 export function loadConfig(cwd = process.cwd()): Config {
+  if (!hasApiKeyConfigured()) {
+    throw new Error(
+      "NAN_API_KEY is not set. Run the app in a terminal to finish setup, or set NAN_API_KEY.",
+    );
+  }
+
   return {
-    apiKey: requireEnv("NAN_API_KEY"),
+    apiKey: process.env.NAN_API_KEY!.trim(),
     baseUrl: (
       process.env.NAN_BASE_URL?.trim() || "https://api.openai.com/v1"
     ).replace(/\/$/, ""),
@@ -45,3 +42,11 @@ export function loadConfig(cwd = process.cwd()): Config {
     timeoutMs: intEnv("NAN_TIMEOUT_MS", 120_000),
   };
 }
+
+export {
+  hasApiKeyConfigured,
+  loadEnvFiles,
+  userConfigDir,
+  userEnvPath,
+  writeUserEnv,
+} from "./env.js";

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { buildFileDiffUi } from "./diff-ui.js";
 import {
   MAX_WRITE_BYTES,
   requireString,
@@ -39,6 +40,14 @@ export const writeFileTool: ToolDefinition = {
 
     const absolute = resolveWorkspacePath(ctx, filePath);
     const existed = fs.existsSync(absolute);
+    let before = "";
+    if (existed) {
+      try {
+        before = fs.readFileSync(absolute, "utf8");
+      } catch {
+        before = "";
+      }
+    }
     fs.mkdirSync(path.dirname(absolute), { recursive: true });
     fs.writeFileSync(absolute, content, "utf8");
 
@@ -49,6 +58,9 @@ export const writeFileTool: ToolDefinition = {
         `path: ${absolute}`,
         `bytes: ${bytes}`,
       ].join("\n"),
+      ui: {
+        diff: buildFileDiffUi(absolute, before, content),
+      },
     };
   },
 };

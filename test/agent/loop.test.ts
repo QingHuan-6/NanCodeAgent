@@ -7,6 +7,7 @@ import {
   assistantText,
   assistantToolCall,
   ScriptedLlm,
+  StreamingScriptedLlm,
 } from "../utils/scripted-llm.js";
 import { createTempDir, removeTempDir } from "../utils/temp.js";
 
@@ -101,5 +102,28 @@ describe("agent loop", () => {
     } finally {
       removeTempDir(dir);
     }
+  });
+
+  it("emits message_start/delta when LLM supports streamChat", async () => {
+    const llm = new StreamingScriptedLlm([assistantText("hello stream")]);
+    const events: AgentEvent["type"][] = [];
+    const deltas: string[] = [];
+
+    const result = await runAgentLoop("hi", {
+      llm,
+      tools: createDefaultRegistry(),
+      session: new Session(),
+      workspace: process.cwd(),
+      maxTurns: 3,
+      onEvent: (e) => {
+        events.push(e.type);
+        if (e.type === "message_delta") deltas.push(e.text);
+      },
+    });
+
+    expect(result.finalText).toBe("hello stream");
+    expect(events).toContain("message_start");
+    expect(events).toContain("message_delta");
+    expect(deltas.join("")).toBe("hello stream");
   });
 });

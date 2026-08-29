@@ -3,27 +3,79 @@
  * NanCodeAgent CLI entry.
  *
  * Usage:
- *   npm run dev                  # interactive REPL
- *   npm run dev -- "one task"    # one-shot
+ *   nan-agent                 # interactive TUI (first run → setup)
+ *   nan-agent --plain         # classic readline REPL
+ *   nan-agent --setup         # re-run API key setup
+ *   nan-agent "one task"      # one-shot (streaming printer)
+ *   npm run dev               # same, from source via tsx
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "./agent/index.js";
 import { createPrinter } from "./cli/printer.js";
 import { runRepl } from "./cli/repl.js";
-import { loadConfig } from "./config.js";
+import { runSetupWizard } from "./cli/setup.js";
+import { runTui } from "./cli/tui/index.js";
+import {
+  hasApiKeyConfigured,
+  loadConfig,
+  loadEnvFiles,
+} from "./config/index.js";
 import { LlmClient } from "./llm/index.js";
 import { Session } from "./session/session.js";
 import { createDefaultRegistry } from "./tools/index.js";
 
-async function main(): Promise<void> {
-  loadDotEnv();
+function printHelp(): void {
+  console.log(`NanCodeAgent
 
-  const args = process.argv.slice(2).filter((a) => a !== "--chat");
+Usage:
+  nan-agent                 Start interactive TUI
+  nan-agent --plain         Classic readline REPL
+  nan-agent "task"          Run one task and exit
+  nan-agent --setup         Configure API key / provider
+  nan-agent --help          Show this help
+
+Config: %USERPROFILE%\\.nan-agent\\.env  (created on first setup)
+Workspace: current directory
+`);
+}
+
+async function main(): Promise<void> {
+  const rawArgs = process.argv.slice(2);
+
+  if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
+    printHelp();
+    return;
+  }
+
+  const setupOnly = rawArgs.includes("--setup");
+  const plain = rawArgs.includes("--plain");
+  const args = rawArgs.filter(
+    (a) =>
+      a !== "--chat" &&
+      a !== "--setup" &&
+      a !== "--help" &&
+      a !== "-h" &&
+      a !== "--plain",
+  );
   const oneShot = args.join(" ").trim();
+
+  loadEnvFiles();
+
+  if (setupOnly || !hasApiKeyConfigured()) {
+    if (!input.isTTY) {
+      console.error(
+        "NAN_API_KEY is missing. Set it in the environment, or run in a terminal to use the setup wizard.",
+      );
+      process.exit(1);
+    }
+    await runSetupWizard();
+    if (setupOnly && !oneShot) {
+      console.log("Setup complete. Run `nan-agent` to start.");
+      return;
+    }
+  }
 
   const config = loadConfig();
   const llm = new LlmClient({
@@ -40,11 +92,15 @@ async function main(): Promise<void> {
   if (!oneShot) {
     if (!input.isTTY) {
       console.error(
-        "Interactive mode needs a TTY. Pass a task for one-shot mode:\n  npm run dev -- \"your task\"",
+        'Interactive mode needs a TTY. Pass a task:\n  nan-agent "your task"',
       );
       process.exit(1);
     }
-    await runRepl({ config, llm, tools, session });
+    if (plain) {
+      await runRepl({ config, llm, tools, session });
+    } else {
+      await runTui({ config, llm, tools, session });
+    }
     return;
   }
 
@@ -54,6 +110,7 @@ async function main(): Promise<void> {
     session,
     workspace: config.workspace,
     maxTurns: config.maxTurns,
+    stream: true,
     onEvent: createPrinter(),
     askPermission: async (reason, toolName) => {
       if (!input.isTTY) return false;
@@ -70,30 +127,6 @@ async function main(): Promise<void> {
       }
     },
   });
-}
-
-/** Minimal .env loader (no dependency). Does not override existing env. */
-function loadDotEnv(): void {
-  const envPath = path.resolve(process.cwd(), ".env");
-  if (!fs.existsSync(envPath)) return;
-  const text = fs.readFileSync(envPath, "utf8");
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
-    }
-  }
 }
 
 main().catch((err) => {

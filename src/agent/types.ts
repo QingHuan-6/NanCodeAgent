@@ -3,7 +3,13 @@
  */
 
 import type { LlmClient } from "../llm/client.js";
-import type { ChatMessage, OpenAIToolDefinition } from "../llm/types.js";
+import type {
+  ChatMessage,
+  ChatRequestOptions,
+  ChatResult,
+  OpenAIToolDefinition,
+  StreamEvent,
+} from "../llm/types.js";
 import type { Session } from "../session/session.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolResult } from "../tools/types.js";
@@ -16,6 +22,14 @@ export interface LlmChatPort {
     tools?: OpenAIToolDefinition[],
     options?: { signal?: AbortSignal },
   ): Promise<ChatMessage>;
+  /**
+   * Optional streaming. When present (and stream !== false), the loop prefers this
+   * and emits message_start / message_delta events.
+   */
+  streamChat?(
+    messages: ChatMessage[],
+    options?: ChatRequestOptions,
+  ): AsyncGenerator<StreamEvent, ChatResult, undefined>;
 }
 
 /** Why the agent loop stopped. */
@@ -36,6 +50,8 @@ export interface AgentLoopOptions {
   maxTurns: number;
   /** How many identical tool+args in a row before stopping. */
   doomLoopThreshold?: number;
+  /** Prefer streamChat when available (default true). */
+  stream?: boolean;
   onEvent?: AgentEventHandler;
   signal?: AbortSignal;
   beforeToolCall?: (

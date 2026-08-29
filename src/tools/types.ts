@@ -1,3 +1,4 @@
+import type { ToolUiMeta } from "../agent/events.js";
 import type { OpenAIToolDefinition, ToolParameterSchema } from "../llm/types.js";
 
 export interface ToolContext {
@@ -9,6 +10,8 @@ export interface ToolResult {
   output: string;
   /** If true, the permission layer or tool asked to stop the agent loop. */
   terminate?: boolean;
+  /** Optional UI metadata (diffs, etc.) — not sent to the model. */
+  ui?: ToolUiMeta;
 }
 
 export interface ToolDefinition {

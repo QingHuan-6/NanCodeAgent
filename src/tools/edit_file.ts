@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { buildFileDiffUi } from "./diff-ui.js";
 import {
   assertTextFileReadable,
   optionalBoolean,
@@ -89,6 +90,9 @@ export const editFileTool: ToolDefinition = {
           preview,
         ].join("\n"),
       ),
+      ui: {
+        diff: buildFileDiffUi(absolute, original, updated),
+      },
     };
   },
 };
