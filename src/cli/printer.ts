@@ -32,6 +32,13 @@ export function createPrinter(
           );
         }
         break;
+      case "user_message":
+        if (event.source === "steer") {
+          console.log(c(color, "cyan", `\n↗ steer: ${event.content}`));
+        } else if (event.source === "follow_up") {
+          console.log(c(color, "cyan", `\n↗ follow-up: ${event.content}`));
+        }
+        break;
       case "turn_start":
         if (!compact) console.log(c(color, "dim", `--- turn ${event.turn} ---`));
         break;

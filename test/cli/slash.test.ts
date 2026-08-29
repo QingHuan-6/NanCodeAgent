@@ -12,12 +12,19 @@ describe("slash commands", () => {
     expect(parseSlashCommand("  /q  ")).toEqual({ type: "exit" });
   });
 
-  it("parses help / clear / status / setup", () => {
+  it("parses help / clear / status / setup / continue / compact / resume", () => {
     expect(parseSlashCommand("/help")).toEqual({ type: "help" });
     expect(parseSlashCommand("/clear")).toEqual({ type: "clear" });
     expect(parseSlashCommand("/status")).toEqual({ type: "status" });
     expect(parseSlashCommand("/setup")).toEqual({ type: "setup" });
     expect(parseSlashCommand("/config")).toEqual({ type: "setup" });
+    expect(parseSlashCommand("/continue")).toEqual({ type: "continue" });
+    expect(parseSlashCommand("/compact")).toEqual({ type: "compact" });
+    expect(parseSlashCommand("/resume abc")).toEqual({
+      type: "resume",
+      id: "abc",
+    });
+    expect(parseSlashCommand("/sessions")).toEqual({ type: "sessions" });
   });
 
   it("flags unknown commands", () => {
@@ -33,5 +40,8 @@ describe("slash commands", () => {
     expect(text).toContain("/setup");
     expect(text).toContain("/exit");
     expect(text).toContain("/clear");
+    expect(text).toContain("/continue");
+    expect(text).toContain("/compact");
+    expect(text).toContain("Steer");
   });
 });

@@ -3,7 +3,11 @@ import { checkPermission } from "../permissions.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolResult } from "../tools/types.js";
 import { emitEvent, type AgentEventHandler } from "./events.js";
-import type { BeforeToolCallResult, ParsedToolCall } from "./types.js";
+import type {
+  BeforeToolCallResult,
+  ParsedToolCall,
+  ToolExecutionMode,
+} from "./types.js";
 
 export interface ToolBatchItem {
   call: ParsedToolCall;
@@ -21,78 +25,153 @@ export interface RunToolBatchOptions {
   ) => Promise<BeforeToolCallResult> | BeforeToolCallResult;
   askPermission: (reason: string, toolName: string) => Promise<boolean>;
   signal?: AbortSignal;
+  /** Default parallel (Pi). */
+  toolExecution?: ToolExecutionMode;
 }
 
+type PreparedOk = {
+  kind: "execute";
+  call: ParsedToolCall;
+};
+
+type PreparedDone = {
+  kind: "done";
+  item: ToolBatchItem;
+};
+
+type Prepared = PreparedOk | PreparedDone;
+
 /**
- * Execute one assistant tool-call batch sequentially.
- * Pi rule: early-stop follow-up LLM only if **every** finalized result has terminate=true.
+ * Execute one assistant tool-call batch.
+ * Pi model: sequential preflight (parse/permission), then parallel execute
+ * unless toolExecution === "sequential". Results / messages keep assistant order;
+ * tool_execution_end may fire in completion order when parallel.
  */
 export async function runToolBatch(
   toolCalls: ToolCall[],
   options: RunToolBatchOptions,
 ): Promise<{ items: ToolBatchItem[]; terminateBatch: boolean }> {
+  const mode = options.toolExecution ?? "parallel";
+  if (mode === "sequential") {
+    return runSequential(toolCalls, options);
+  }
+  return runParallel(toolCalls, options);
+}
+
+async function runSequential(
+  toolCalls: ToolCall[],
+  options: RunToolBatchOptions,
+): Promise<{ items: ToolBatchItem[]; terminateBatch: boolean }> {
   const items: ToolBatchItem[] = [];
-  let terminateVotes = 0;
 
   for (const raw of toolCalls) {
     throwIfAborted(options.signal);
-
-    const call = parseToolCall(raw);
-    await emitEvent(options.onEvent, {
-      type: "tool_execution_start",
-      toolCallId: call.id,
-      toolName: call.name,
-      args: call.args,
-    });
-
-    if (call.parseError) {
-      const result: ToolResult = {
-        output: `Tool call arguments were invalid JSON: ${call.parseError}. Re-issue the tool with valid JSON arguments.`,
-      };
-      items.push({ call, result, isError: true });
-      await emitToolEnd(options.onEvent, call, result.output, true);
+    const prepared = await preflightOne(raw, options);
+    if (prepared.kind === "done") {
+      items.push(prepared.item);
       continue;
     }
-
-    const gate = await options.beforeToolCall(call.name, call.args);
-    await emitEvent(options.onEvent, {
-      type: "permission",
-      toolName: call.name,
-      decision: gate.decision,
-      reason: gate.reason,
-    });
-
-    let allowed = gate.decision === "allow";
-    if (gate.decision === "ask") {
-      allowed = await options.askPermission(
-        gate.reason ?? "Confirm tool use",
-        call.name,
-      );
-    }
-    if (gate.decision === "deny" || !allowed) {
-      const result: ToolResult = {
-        output: `Permission denied: ${gate.reason ?? "blocked by policy"}`,
-        terminate: gate.terminate,
-      };
-      if (result.terminate) terminateVotes += 1;
-      items.push({ call, result, isError: true });
-      await emitToolEnd(options.onEvent, call, result.output, true);
-      continue;
-    }
-
-    const result = await options.tools.run(call.name, call.args, {
-      workspace: options.workspace,
-    });
-    const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
-    if (result.terminate) terminateVotes += 1;
-    items.push({ call, result, isError });
-    await emitToolEnd(options.onEvent, call, result.output, isError, result.ui);
+    const item = await executeOne(prepared.call, options);
+    items.push(item);
   }
 
-  const terminateBatch =
-    items.length > 0 && terminateVotes === items.length;
+  return { items, terminateBatch: isTerminateBatch(items) };
+}
 
-  return { items, terminateBatch };
+async function runParallel(
+  toolCalls: ToolCall[],
+  options: RunToolBatchOptions,
+): Promise<{ items: ToolBatchItem[]; terminateBatch: boolean }> {
+  const preparedList: Prepared[] = [];
+
+  // Sequential preflight — permissions / parse errors never race.
+  for (const raw of toolCalls) {
+    throwIfAborted(options.signal);
+    preparedList.push(await preflightOne(raw, options));
+  }
+
+  const items: ToolBatchItem[] = await Promise.all(
+    preparedList.map(async (prepared) => {
+      if (prepared.kind === "done") return prepared.item;
+      return executeOne(prepared.call, options);
+    }),
+  );
+
+  return { items, terminateBatch: isTerminateBatch(items) };
+}
+
+async function preflightOne(
+  raw: ToolCall,
+  options: RunToolBatchOptions,
+): Promise<Prepared> {
+  const call = parseToolCall(raw);
+  await emitEvent(options.onEvent, {
+    type: "tool_execution_start",
+    toolCallId: call.id,
+    toolName: call.name,
+    args: call.args,
+  });
+
+  if (call.parseError) {
+    const result: ToolResult = {
+      output: `Tool call arguments were invalid JSON: ${call.parseError}. Re-issue the tool with valid JSON arguments.`,
+    };
+    const item: ToolBatchItem = { call, result, isError: true };
+    await emitToolEnd(options.onEvent, call, result.output, true);
+    return { kind: "done", item };
+  }
+
+  const gate = await options.beforeToolCall(call.name, call.args);
+  await emitEvent(options.onEvent, {
+    type: "permission",
+    toolName: call.name,
+    decision: gate.decision,
+    reason: gate.reason,
+  });
+
+  let allowed = gate.decision === "allow";
+  if (gate.decision === "ask") {
+    allowed = await options.askPermission(
+      gate.reason ?? "Confirm tool use",
+      call.name,
+    );
+  }
+  if (gate.decision === "deny" || !allowed) {
+    const result: ToolResult = {
+      output: `Permission denied: ${gate.reason ?? "blocked by policy"}`,
+      terminate: gate.terminate,
+    };
+    const item: ToolBatchItem = { call, result, isError: true };
+    await emitToolEnd(options.onEvent, call, result.output, true);
+    return { kind: "done", item };
+  }
+
+  return { kind: "execute", call };
+}
+
+async function executeOne(
+  call: ParsedToolCall,
+  options: RunToolBatchOptions,
+): Promise<ToolBatchItem> {
+  throwIfAborted(options.signal);
+  const result = await options.tools.run(call.name, call.args, {
+    workspace: options.workspace,
+  });
+  const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
+  const item: ToolBatchItem = { call, result, isError };
+  await emitToolEnd(
+    options.onEvent,
+    call,
+    result.output,
+    isError,
+    result.ui,
+  );
+  return item;
+}
+
+function isTerminateBatch(items: ToolBatchItem[]): boolean {
+  if (items.length === 0) return false;
+  return items.every((i) => i.result.terminate === true);
 }
 
 export function parseToolCall(call: ToolCall): ParsedToolCall {

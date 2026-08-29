@@ -1,10 +1,10 @@
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { runAgentLoop } from "../agent/index.js";
+import { AgentRuntime } from "../agent/index.js";
 import type { AgentLoopOptions } from "../agent/types.js";
 import { loadConfig, type Config } from "../config/index.js";
 import { LlmClient } from "../llm/client.js";
-import type { Session } from "../session/session.js";
+import { Session } from "../session/session.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { createPrinter } from "./printer.js";
 import { runSetupWizard } from "./setup.js";
@@ -18,13 +18,24 @@ export interface ReplContext {
 }
 
 /**
- * Interactive REPL: one long-lived session, each line is a user turn.
+ * Classic readline REPL with AgentRuntime (continue/compact/resume).
+ * Mid-run steer is TUI-only (readline blocks).
  */
 export async function runRepl(ctx: ReplContext): Promise<void> {
   printBanner(ctx);
 
   const rl = readline.createInterface({ input, output, terminal: true });
   const askPermission = createAskPermission(rl);
+  const printer = createPrinter({ compact: true });
+
+  const runtime = new AgentRuntime({
+    config: ctx.config,
+    llm: ctx.llm,
+    tools: ctx.tools,
+    session: ctx.session,
+    onEvent: printer,
+    askPermission,
+  });
 
   try {
     while (true) {
@@ -40,13 +51,17 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
 
       const slash = parseSlashCommand(trimmed);
       if (slash) {
-        const shouldExit = await handleSlash(slash, ctx, rl);
+        const shouldExit = await handleSlash(slash, ctx, rl, runtime);
         if (shouldExit) break;
+        // Keep runtime bound to possibly replaced session/config
+        runtime.config = ctx.config;
+        runtime.llm = ctx.llm;
+        runtime.session = ctx.session;
         continue;
       }
 
       try {
-        await runAgentLoop(trimmed, buildLoopOptions(ctx, askPermission));
+        await runtime.prompt(trimmed);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[error] ${message}`);
@@ -56,22 +71,6 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
     rl.close();
     console.log("Bye.");
   }
-}
-
-function buildLoopOptions(
-  ctx: ReplContext,
-  askPermission: AgentLoopOptions["askPermission"],
-): AgentLoopOptions {
-  return {
-    llm: ctx.llm,
-    tools: ctx.tools,
-    session: ctx.session,
-    workspace: ctx.config.workspace,
-    maxTurns: ctx.config.maxTurns,
-    stream: true,
-    onEvent: createPrinter({ compact: true }),
-    askPermission,
-  };
 }
 
 function createAskPermission(
@@ -91,6 +90,7 @@ async function handleSlash(
   slash: SlashAction,
   ctx: ReplContext,
   rl: readline.Interface,
+  runtime: AgentRuntime,
 ): Promise<boolean> {
   switch (slash.type) {
     case "exit":
@@ -125,7 +125,48 @@ async function handleSlash(
         maxRetries: ctx.config.maxRetries,
         timeoutMs: ctx.config.timeoutMs,
       });
+      runtime.config = ctx.config;
+      runtime.llm = ctx.llm;
       console.log(`Using model ${ctx.config.model} @ ${ctx.config.baseUrl}`);
+      return false;
+    }
+    case "continue":
+      try {
+        await runtime.continue();
+      } catch (err) {
+        console.error(`[error] ${err instanceof Error ? err.message : err}`);
+      }
+      return false;
+    case "compact": {
+      const { removed } = runtime.compact();
+      console.log(`Compacted (removed ~${removed} messages).`);
+      return false;
+    }
+    case "sessions": {
+      const ids = Session.listSessionIds("sessions");
+      console.log(
+        ids.length === 0
+          ? "No saved sessions."
+          : ids.map((id) => `  ${id}`).join("\n"),
+      );
+      return false;
+    }
+    case "resume": {
+      if (!slash.id) {
+        console.log("Usage: /resume <session-id>");
+        return false;
+      }
+      try {
+        ctx.session = Session.loadFromJsonl(`sessions/${slash.id}.jsonl`, {
+          persistDir: "sessions",
+        });
+        runtime.session = ctx.session;
+        console.log(
+          `Loaded ${ctx.session.id} (${ctx.session.messageCount()} messages). Use /continue to resume.`,
+        );
+      } catch (err) {
+        console.error(`[error] ${err instanceof Error ? err.message : err}`);
+      }
       return false;
     }
     case "unknown":
@@ -140,7 +181,7 @@ function printBanner(ctx: ReplContext): void {
   console.log(
     [
       "",
-      "NanCodeAgent — interactive mode",
+      "NanCodeAgent — plain REPL",
       `model: ${ctx.config.model}`,
       `workspace: ${ctx.config.workspace}`,
       "Type a task, or /help. /exit to quit.",

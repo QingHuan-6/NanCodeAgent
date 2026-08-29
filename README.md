@@ -6,7 +6,7 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive **Ink TUI** (stream + spinner + diffs) + `--plain` REPL + first-run API setup + agent loop + local tools + Vitest.
+Interactive **Ink TUI** (stream, spinner, diffs, mid-run **steer**) + `--plain` REPL + parallel tools + context prune + session resume.
 
 ## Setup
 
@@ -46,7 +46,8 @@ npm run dev -- --plain
 npm run dev -- "Create a hello.py that prints hi"
 ```
 
-Inside TUI / REPL: `/help` `/status` `/clear` `/exit`  
+Inside TUI / REPL: `/help` `/status` `/clear` `/compact` `/continue` `/sessions` `/resume` `/exit`  
+While busy in TUI: **Enter steers** (injects after current tools); Esc aborts.  
 Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
 
 ### Use from any folder (global)

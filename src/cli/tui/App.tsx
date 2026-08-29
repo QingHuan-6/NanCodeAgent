@@ -1,22 +1,21 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
-import { runAgentLoop } from "../../agent/index.js";
+import { AgentRuntime } from "../../agent/index.js";
 import type { AgentEvent } from "../../agent/events.js";
-import type { AgentLoopOptions } from "../../agent/types.js";
 import type { Config } from "../../config/index.js";
 import type { LlmClient } from "../../llm/client.js";
-import type { Session } from "../../session/session.js";
+import { Session } from "../../session/session.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { helpText, parseSlashCommand } from "../slash.js";
-import { DiffBlock } from "./DiffBlock.js";
 import { theme } from "./theme.js";
+import { ToolCard } from "./ToolCard.js";
 import {
   nextId,
   summarizeArgs,
   type PermissionRequest,
   type StatusState,
-  type TranscriptItem,
+  type TimelineItem,
 } from "./types.js";
 
 export interface TuiAppProps {
@@ -26,14 +25,19 @@ export interface TuiAppProps {
   session: Session;
 }
 
+/**
+ * Chronological transcript TUI (OpenCode / Pi event order):
+ *   user → assistant → tools (live update) → assistant → … → done
+ * Footer stays: composer + status. No separate "tools dump" below history.
+ */
 export function TuiApp(props: TuiAppProps): React.ReactElement {
   const { exit } = useApp();
-  const config = props.config;
-  const llm = props.llm;
-  const tools = props.tools;
-  const session = props.session;
+  const [config] = useState(props.config);
+  const [llm] = useState(props.llm);
+  const toolsReg = props.tools;
+  const [session, setSession] = useState(props.session);
 
-  const [history, setHistory] = useState<TranscriptItem[]>([
+  const [timeline, setTimeline] = useState<TimelineItem[]>([
     {
       id: nextId("sys"),
       kind: "system",
@@ -42,25 +46,35 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     {
       id: nextId("sys"),
       kind: "system",
-      text: "Type a task · /help · Ctrl+J newline · Esc abort · /exit quit",
+      text: "prompt · steer while busy · Esc abort · ctrl+o fold tool · /help",
     },
   ]);
+  const [focusedToolId, setFocusedToolId] = useState<string | null>(null);
   const [streamBuffer, setStreamBuffer] = useState("");
   const [status, setStatus] = useState<StatusState>({ phase: "idle" });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
   const streamBufRef = useRef("");
+  const runtimeRef = useRef<AgentRuntime | null>(null);
 
-  const pushHistory = useCallback((item: TranscriptItem) => {
-    setHistory((prev) => [...prev, item]);
+  const pushItem = useCallback((item: TimelineItem) => {
+    setTimeline((prev) => [...prev, item]);
   }, []);
 
   const onEvent = useCallback(
     (event: AgentEvent) => {
       switch (event.type) {
+        case "user_message":
+          if (event.source === "steer" || event.source === "follow_up") {
+            pushItem({
+              id: nextId("user"),
+              kind: "user",
+              text: `[${event.source}] ${event.content}`,
+            });
+          }
+          break;
         case "turn_start":
           setStatus({ phase: "thinking", detail: `turn ${event.turn}` });
           break;
@@ -82,10 +96,17 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           streamBufRef.current = "";
           setStreamBuffer("");
           if (finalText) {
-            pushHistory({
+            pushItem({
               id: nextId("asst"),
               kind: "assistant",
               text: finalText,
+            });
+          } else if (event.toolCallCount > 0) {
+            // Model jumped straight to tools — show a slim cue in-order.
+            pushItem({
+              id: nextId("asst"),
+              kind: "assistant",
+              text: `(calling ${event.toolCallCount} tool${event.toolCallCount > 1 ? "s" : ""})`,
             });
           }
           if (event.toolCallCount > 0) {
@@ -96,29 +117,58 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           }
           break;
         }
-        case "tool_execution_start":
+        case "tool_execution_start": {
+          const id = nextId("tool");
           setStatus({ phase: "tool", detail: event.toolName });
-          pushHistory({
-            id: nextId("tool"),
+          setFocusedToolId(id);
+          pushItem({
+            id,
             kind: "tool",
+            toolCallId: event.toolCallId,
             toolName: event.toolName,
             argsSummary: summarizeArgs(event.args),
+            status: "running",
+            expanded: false,
           });
           break;
+        }
         case "tool_execution_end":
-          // Static only renders new items — append result instead of mutating.
-          pushHistory({
-            id: nextId("tool-end"),
-            kind: "tool",
-            toolName: event.toolName,
-            argsSummary: "",
-            output: event.output,
-            isError: event.isError,
-            diff: event.ui?.diff,
+          setTimeline((prev) => {
+            const idx = findToolIndex(prev, event.toolCallId, event.toolName);
+            if (idx < 0) {
+              const id = nextId("tool");
+              setFocusedToolId(id);
+              return [
+                ...prev,
+                {
+                  id,
+                  kind: "tool" as const,
+                  toolCallId: event.toolCallId,
+                  toolName: event.toolName,
+                  argsSummary: "",
+                  status: (event.isError ? "error" : "done") as "error" | "done",
+                  output: event.output,
+                  diff: event.ui?.diff,
+                  expanded: false,
+                },
+              ];
+            }
+            const copy = [...prev];
+            const cur = copy[idx]!;
+            if (cur.kind !== "tool") return prev;
+            copy[idx] = {
+              ...cur,
+              status: event.isError ? "error" : "done",
+              output: event.output,
+              diff: event.ui?.diff,
+              expanded: false,
+            };
+            setFocusedToolId(cur.id);
+            return copy;
           });
           break;
         case "error":
-          pushHistory({
+          pushItem({
             id: nextId("err"),
             kind: "error",
             text: event.message,
@@ -128,12 +178,18 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           setStatus({ phase: "idle" });
           streamBufRef.current = "";
           setStreamBuffer("");
+          pushItem({
+            id: nextId("done"),
+            kind: "done",
+            reason: event.reason,
+            turns: event.turns,
+          });
           break;
         default:
           break;
       }
     },
-    [pushHistory],
+    [pushItem],
   );
 
   const askPermission = useCallback(
@@ -154,71 +210,135 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     [],
   );
 
-  const runTask = useCallback(
-    async (task: string) => {
-      if (busy) return;
-      setBusy(true);
-      pushHistory({ id: nextId("user"), kind: "user", text: task });
-      const ac = new AbortController();
-      abortRef.current = ac;
-      setStatus({ phase: "thinking", detail: "starting" });
+  const getRuntime = useCallback((): AgentRuntime => {
+    if (
+      !runtimeRef.current ||
+      runtimeRef.current.session !== session ||
+      runtimeRef.current.llm !== llm ||
+      runtimeRef.current.config !== config
+    ) {
+      runtimeRef.current = new AgentRuntime({
+        config,
+        llm,
+        tools: toolsReg,
+        session,
+        onEvent,
+        askPermission,
+      });
+    } else {
+      runtimeRef.current.onEvent = onEvent;
+      runtimeRef.current.askPermission = askPermission;
+    }
+    return runtimeRef.current;
+  }, [config, llm, toolsReg, session, onEvent, askPermission]);
 
+  const runPrompt = useCallback(
+    async (task: string) => {
+      const runtime = getRuntime();
+      if (runtime.isRunning) {
+        runtime.steer(task);
+        pushItem({
+          id: nextId("sys"),
+          kind: "system",
+          text: `Queued steer: ${task}`,
+        });
+        return;
+      }
+      setBusy(true);
+      pushItem({ id: nextId("user"), kind: "user", text: task });
+      setStatus({ phase: "thinking", detail: "starting" });
       try {
-        const options: AgentLoopOptions = {
-          llm,
-          tools,
-          session,
-          workspace: config.workspace,
-          maxTurns: config.maxTurns,
-          stream: true,
-          onEvent,
-          askPermission,
-          signal: ac.signal,
-        };
-        await runAgentLoop(task, options);
+        await runtime.prompt(task);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        pushHistory({ id: nextId("err"), kind: "error", text: message });
+        pushItem({ id: nextId("err"), kind: "error", text: message });
       } finally {
-        abortRef.current = null;
         setBusy(false);
         setStatus({ phase: "idle" });
         streamBufRef.current = "";
         setStreamBuffer("");
       }
     },
-    [
-      busy,
-      llm,
-      tools,
-      session,
-      config.workspace,
-      config.maxTurns,
-      onEvent,
-      askPermission,
-      pushHistory,
-    ],
+    [getRuntime, pushItem],
+  );
+
+  const runContinue = useCallback(async () => {
+    const runtime = getRuntime();
+    if (runtime.isRunning) {
+      pushItem({
+        id: nextId("sys"),
+        kind: "system",
+        text: "Agent is busy — wait or Esc abort first.",
+      });
+      return;
+    }
+    setBusy(true);
+    pushItem({
+      id: nextId("sys"),
+      kind: "system",
+      text: "Continuing from session…",
+    });
+    try {
+      await runtime.continue();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      pushItem({ id: nextId("err"), kind: "error", text: message });
+    } finally {
+      setBusy(false);
+      setStatus({ phase: "idle" });
+    }
+  }, [getRuntime, pushItem]);
+
+  const toolIds = useMemo(
+    () => timeline.filter((i) => i.kind === "tool").map((i) => i.id),
+    [timeline],
+  );
+
+  const toggleFocusedTool = useCallback(() => {
+    setTimeline((prev) => {
+      const tools = prev.filter((i) => i.kind === "tool");
+      if (tools.length === 0) return prev;
+      const targetId =
+        focusedToolId && tools.some((t) => t.id === focusedToolId)
+          ? focusedToolId
+          : tools[tools.length - 1]!.id;
+      return prev.map((item) => {
+        if (item.kind !== "tool" || item.id !== targetId) return item;
+        if (item.status === "running") return item;
+        if (!item.output && !item.diff) return item;
+        return { ...item, expanded: !item.expanded };
+      });
+    });
+  }, [focusedToolId]);
+
+  const moveToolFocus = useCallback(
+    (delta: number) => {
+      if (toolIds.length === 0) return;
+      const cur = focusedToolId ? toolIds.indexOf(focusedToolId) : -1;
+      const base = cur < 0 ? toolIds.length - 1 : cur;
+      const next = toolIds[(base + delta + toolIds.length) % toolIds.length]!;
+      setFocusedToolId(next);
+    },
+    [toolIds, focusedToolId],
   );
 
   const handleSlash = useCallback(
     async (line: string): Promise<boolean> => {
       const slash = parseSlashCommand(line);
       if (!slash) return false;
+      const runtime = getRuntime();
 
       switch (slash.type) {
         case "exit":
           exit();
           return true;
         case "help":
-          pushHistory({
-            id: nextId("sys"),
-            kind: "system",
-            text: helpText(),
-          });
+          pushItem({ id: nextId("sys"), kind: "system", text: helpText() });
           return true;
         case "clear":
           session.clear();
-          setHistory([
+          setFocusedToolId(null);
+          setTimeline([
             {
               id: nextId("sys"),
               kind: "system",
@@ -227,52 +347,112 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           ]);
           return true;
         case "status":
-          pushHistory({
+          pushItem({
             id: nextId("sys"),
             kind: "system",
             text: [
               `session:   ${session.id}`,
               `messages:  ${session.messageCount()}`,
               `model:     ${config.model}`,
-              `base_url:  ${config.baseUrl}`,
               `workspace: ${config.workspace}`,
-              `max_turns: ${config.maxTurns}`,
+              `running:   ${runtime.isRunning}`,
             ].join("\n"),
           });
           return true;
         case "setup":
-          pushHistory({
+          pushItem({
             id: nextId("sys"),
             kind: "system",
-            text: "Exit TUI and run: nan-agent --setup  (or nan-agent --plain then /setup)",
+            text: "Exit TUI and run: nan-agent --setup",
           });
           return true;
-        case "unknown":
-          pushHistory({
+        case "continue":
+          await runContinue();
+          return true;
+        case "compact": {
+          const { removed } = runtime.compact();
+          pushItem({
             id: nextId("sys"),
             kind: "system",
-            text: `Unknown command: /${slash.name}. Type /help.`,
+            text: `Compacted (removed ~${removed} messages).`,
+          });
+          return true;
+        }
+        case "sessions": {
+          const ids = Session.listSessionIds("sessions");
+          pushItem({
+            id: nextId("sys"),
+            kind: "system",
+            text:
+              ids.length === 0
+                ? "No saved sessions."
+                : `Sessions:\n${ids.map((id) => `  ${id}`).join("\n")}`,
+          });
+          return true;
+        }
+        case "resume": {
+          if (runtime.isRunning) {
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: "Cannot resume while running.",
+            });
+            return true;
+          }
+          if (!slash.id) {
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: "Usage: /resume <session-id>",
+            });
+            return true;
+          }
+          try {
+            const loaded = Session.loadFromJsonl(`sessions/${slash.id}.jsonl`, {
+              persistDir: "sessions",
+            });
+            setSession(loaded);
+            runtimeRef.current = null;
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: `Loaded ${loaded.id} (${loaded.messageCount()} msgs). /continue to resume.`,
+            });
+          } catch (err) {
+            pushItem({
+              id: nextId("err"),
+              kind: "error",
+              text: err instanceof Error ? err.message : String(err),
+            });
+          }
+          return true;
+        }
+        case "unknown":
+          pushItem({
+            id: nextId("sys"),
+            kind: "system",
+            text: `Unknown: /${slash.name}. /help`,
           });
           return true;
         default:
           return true;
       }
     },
-    [exit, pushHistory, session, config],
+    [exit, pushItem, session, config, getRuntime, runContinue],
   );
 
   const submit = useCallback(
     async (raw: string) => {
       const trimmed = raw.trim();
-      if (!trimmed || busy || permission) return;
+      if (!trimmed || permission) return;
       setInput("");
       if (trimmed.startsWith("/")) {
         await handleSlash(trimmed);
         return;
       }
-      await runTask(trimmed);
+      await runPrompt(trimmed);
     },
-    [busy, permission, handleSlash, runTask],
+    [permission, handleSlash, runPrompt],
   );
 
   useInput((ch, key) => {
@@ -288,12 +468,23 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       return;
     }
 
-    if (key.escape && busy) {
-      abortRef.current?.abort();
+    if (key.ctrl && ch === "o") {
+      toggleFocusedTool();
+      return;
+    }
+    if (key.ctrl && ch === "p") {
+      moveToolFocus(-1);
+      return;
+    }
+    if (key.ctrl && ch === "n") {
+      moveToolFocus(1);
       return;
     }
 
-    if (busy) return;
+    if (key.escape && busy) {
+      getRuntime().abort();
+      return;
+    }
 
     if (key.return) {
       void submit(input);
@@ -322,19 +513,25 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       case "streaming":
         return "Streaming…";
       case "tool":
-        return `Running ${status.detail ?? "tool"}…`;
+        return `Tools · ${status.detail ?? ""}`;
       case "ask":
         return `Permission: ${status.detail}`;
       default:
-        return "Ready";
+        return busy ? "Busy · enter steers" : "Ready";
     }
-  }, [status]);
+  }, [status, busy]);
 
   return (
     <Box flexDirection="column" width="100%">
-      <Static items={history}>
-        {(item) => <HistoryLine key={item.id} item={item} />}
-      </Static>
+      <Box flexDirection="column">
+        {timeline.map((item) => (
+          <TimelineRow
+            key={item.id}
+            item={item}
+            focusedToolId={focusedToolId}
+          />
+        ))}
+      </Box>
 
       {streamBuffer ? (
         <Box flexDirection="column" marginBottom={1}>
@@ -342,6 +539,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             assistant
           </Text>
           <Text color={theme.assistant}>{streamBuffer}</Text>
+          <Text dimColor>▊</Text>
         </Box>
       ) : null}
 
@@ -366,14 +564,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             paddingX={1}
           >
             <Box>
-              <Text color={theme.brand}>{"> "}</Text>
+              <Text color={theme.brand}>{busy ? "↗ " : "> "}</Text>
               <Text>
                 {input.length > 0 ? input : ""}
                 {input.length === 0 ? (
-                  <Text dimColor>message…</Text>
+                  <Text dimColor>
+                    {busy ? "steer…" : "message…"}
+                  </Text>
                 ) : null}
               </Text>
-              {!busy ? <Text color={theme.brand}>█</Text> : null}
+              <Text color={theme.brand}>█</Text>
             </Box>
           </Box>
         )}
@@ -385,7 +585,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             </Text>
           ) : (
             <Text dimColor>
-              {statusLabel} · enter send · ctrl+j newline
+              {statusLabel} · ctrl+o fold · ctrl+p/n tool
             </Text>
           )}
         </Box>
@@ -394,7 +594,13 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   );
 }
 
-function HistoryLine({ item }: { item: TranscriptItem }): React.ReactElement {
+function TimelineRow({
+  item,
+  focusedToolId,
+}: {
+  item: TimelineItem;
+  focusedToolId: string | null;
+}): React.ReactElement {
   switch (item.kind) {
     case "user":
       return (
@@ -411,27 +617,21 @@ function HistoryLine({ item }: { item: TranscriptItem }): React.ReactElement {
           <Text color={theme.brand} bold>
             assistant
           </Text>
-          <Text>{item.text}</Text>
+          <Text dimColor={item.text.startsWith("(calling")}>
+            {item.text}
+          </Text>
         </Box>
       );
     case "tool":
       return (
-        <Box flexDirection="column" marginBottom={item.output || item.diff ? 1 : 0}>
-          {item.argsSummary ? (
-            <Text color={theme.tool}>
-              ▸ {item.toolName}({item.argsSummary})
-            </Text>
-          ) : null}
-          {item.diff ? (
-            <DiffBlock diff={item.diff} />
-          ) : item.output ? (
-            <Text
-              color={item.isError ? theme.error : undefined}
-              dimColor={!item.isError}
-            >
-              {truncate(item.output, 600)}
-            </Text>
-          ) : null}
+        <ToolCard card={item} focused={item.id === focusedToolId} />
+      );
+    case "done":
+      return (
+        <Box marginY={1}>
+          <Text color={theme.success}>
+            ── done ({item.reason}, {item.turns} turns) ──
+          </Text>
         </Box>
       );
     case "error":
@@ -447,6 +647,20 @@ function HistoryLine({ item }: { item: TranscriptItem }): React.ReactElement {
   }
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+function findToolIndex(
+  items: TimelineItem[],
+  toolCallId: string,
+  toolName: string,
+): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const c = items[i]!;
+    if (c.kind === "tool" && c.toolCallId === toolCallId) return i;
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const c = items[i]!;
+    if (c.kind === "tool" && c.toolName === toolName && c.status === "running") {
+      return i;
+    }
+  }
+  return -1;
 }

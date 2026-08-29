@@ -42,6 +42,9 @@ export type StopReason =
   | "error"
   | "should_stop";
 
+/** Pi-style tool batch execution mode. */
+export type ToolExecutionMode = "parallel" | "sequential";
+
 export interface AgentLoopOptions {
   llm: LlmChatPort | LlmClient;
   tools: ToolRegistry;
@@ -52,6 +55,8 @@ export interface AgentLoopOptions {
   doomLoopThreshold?: number;
   /** Prefer streamChat when available (default true). */
   stream?: boolean;
+  /** Default parallel (Pi). */
+  toolExecution?: ToolExecutionMode;
   onEvent?: AgentEventHandler;
   signal?: AbortSignal;
   beforeToolCall?: (
@@ -60,9 +65,20 @@ export interface AgentLoopOptions {
   ) => Promise<BeforeToolCallResult> | BeforeToolCallResult;
   askPermission?: (reason: string, toolName: string) => Promise<boolean>;
   shouldStopAfterTurn?: (ctx: AfterTurnContext) => Promise<boolean> | boolean;
+  /** Called once per LLM call; must not throw. Does not mutate session by itself. */
   transformContext?: (
     messages: ChatMessage[],
+    signal?: AbortSignal,
   ) => Promise<ChatMessage[]> | ChatMessage[];
+  /**
+   * Drain steering queue (Pi). Called after tools / at loop start.
+   * Injected as user messages before the next LLM call.
+   */
+  getSteeringMessages?: () => Promise<ChatMessage[]> | ChatMessage[];
+  /**
+   * Drain follow-up queue when the agent would otherwise stop (no more tools).
+   */
+  getFollowUpMessages?: () => Promise<ChatMessage[]> | ChatMessage[];
 }
 
 export interface BeforeToolCallResult {

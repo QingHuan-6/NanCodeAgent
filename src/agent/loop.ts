@@ -15,10 +15,16 @@ import type {
   StopReason,
 } from "./types.js";
 
+type PendingUser = {
+  message: ChatMessage;
+  source: "steer" | "follow_up";
+};
+
 /**
  * Core harness loop — messages → LLM → tools → repeat.
  *
- * Turn = one LLM call + optional tool batch. UI listens via onEvent only.
+ * Pi-shaped: outer follow-up loop + inner tool/steering loop;
+ * transformContext per LLM call; steering injected after tool batches.
  */
 export async function runAgentLoop(
   task: string,
@@ -29,13 +35,18 @@ export async function runAgentLoop(
 
   const onEvent = options.onEvent ?? noopEvents();
   await emitEvent(onEvent, { type: "agent_start", task });
+  await emitEvent(onEvent, {
+    type: "user_message",
+    content: task,
+    source: "prompt",
+  });
 
   return runTurns(options, onEvent);
 }
 
 /**
  * Continue from existing session without a new user message.
- * Last message must be user or tool.
+ * Last message must be user or tool (Pi agentLoopContinue).
  */
 export async function continueAgentLoop(
   options: AgentLoopOptions,
@@ -62,9 +73,7 @@ async function runTurns(
   options: AgentLoopOptions,
   onEvent: NonNullable<AgentLoopOptions["onEvent"]>,
 ): Promise<AgentLoopResult> {
-  const ask =
-    options.askPermission ??
-    (async () => false);
+  const ask = options.askPermission ?? (async () => false);
   const beforeToolCall =
     options.beforeToolCall ?? defaultBeforeToolCall(options.workspace);
   const doom = new DoomLoopGuard(options.doomLoopThreshold ?? 3);
@@ -73,113 +82,202 @@ async function runTurns(
   let turns = 0;
 
   try {
-    for (let turn = 1; turn <= options.maxTurns; turn++) {
-      throwIfAborted(options.signal);
-      turns = turn;
-      await emitEvent(onEvent, { type: "turn_start", turn });
+    // Steering typed while idle / between prompts (Pi initial poll).
+    let pending: PendingUser[] = (
+      await drainMessages(options.getSteeringMessages)
+    ).map((message) => ({ message, source: "steer" as const }));
 
-      const contextMessages = options.transformContext
-        ? await options.transformContext(options.session.getMessages())
-        : options.session.getMessages();
+    while (true) {
+      let hasMoreToolCalls = true;
 
-      const assistant = await callLlm(
-        options.llm,
-        contextMessages,
-        options.tools.toOpenAITools(),
-        onEvent,
-        options.signal,
-        options.stream !== false,
-      );
-      options.session.append(assistant);
+      while (hasMoreToolCalls || pending.length > 0) {
+        throwIfAborted(options.signal);
 
-      if (assistant.content) {
-        lastText = assistant.content;
-      }
+        if (turns >= options.maxTurns) {
+          return finish(onEvent, {
+            finalText: lastText || "Stopped: max turns reached.",
+            turns,
+            stopReason: "max_turns",
+          });
+        }
+        turns += 1;
+        await emitEvent(onEvent, { type: "turn_start", turn: turns });
 
-      const toolCalls = assistant.tool_calls ?? [];
-      await emitEvent(onEvent, {
-        type: "assistant_message",
-        content: assistant.content,
-        toolCallCount: toolCalls.length,
-      });
+        if (pending.length > 0) {
+          for (const item of pending) {
+            options.session.append(item.message);
+            const content =
+              typeof item.message.content === "string"
+                ? item.message.content
+                : "";
+            await emitEvent(onEvent, {
+              type: "user_message",
+              content,
+              source: item.source,
+            });
+          }
+          pending = [];
+        }
 
-      if (toolCalls.length === 0) {
+        const rawMessages = options.session.getMessages();
+        const contextMessages = options.transformContext
+          ? await options.transformContext(rawMessages, options.signal)
+          : rawMessages;
+
+        const assistant = await callLlm(
+          options.llm,
+          contextMessages,
+          options.tools.toOpenAITools(),
+          onEvent,
+          options.signal,
+          options.stream !== false,
+        );
+        options.session.append(assistant);
+
+        if (assistant.content) {
+          lastText = assistant.content;
+        }
+
+        const toolCalls = assistant.tool_calls ?? [];
+        await emitEvent(onEvent, {
+          type: "assistant_message",
+          content: assistant.content,
+          toolCallCount: toolCalls.length,
+        });
+
+        let toolCount = 0;
+        hasMoreToolCalls = false;
+
+        if (toolCalls.length > 0) {
+          for (const raw of toolCalls) {
+            const parsed = parseToolCall(raw);
+            if (doom.observe(parsed)) {
+              const msg =
+                "Stopped: the same tool was called with the same arguments repeatedly (doom loop).";
+              await emitEvent(onEvent, { type: "error", message: msg });
+              await emitEvent(onEvent, {
+                type: "turn_end",
+                turn: turns,
+                hasToolCalls: true,
+                toolCount: 0,
+              });
+              return finish(onEvent, {
+                finalText: msg,
+                turns,
+                stopReason: "doom_loop",
+              });
+            }
+          }
+
+          const batch = await runToolBatch(toolCalls, {
+            tools: options.tools,
+            workspace: options.workspace,
+            onEvent,
+            beforeToolCall,
+            askPermission: ask,
+            signal: options.signal,
+            toolExecution: options.toolExecution ?? "parallel",
+          });
+
+          for (const message of toolItemsToMessages(batch.items)) {
+            options.session.append(message);
+          }
+          toolCount = batch.items.length;
+
+          if (batch.terminateBatch) {
+            await emitEvent(onEvent, {
+              type: "turn_end",
+              turn: turns,
+              hasToolCalls: true,
+              toolCount,
+            });
+            return finish(onEvent, {
+              finalText:
+                lastText ||
+                batch.items[batch.items.length - 1]?.result.output ||
+                "",
+              turns,
+              stopReason: "tool_terminate",
+            });
+          }
+
+          hasMoreToolCalls = true;
+
+          await emitEvent(onEvent, {
+            type: "turn_end",
+            turn: turns,
+            hasToolCalls: true,
+            toolCount,
+          });
+
+          if (
+            options.shouldStopAfterTurn &&
+            (await options.shouldStopAfterTurn({
+              turn: turns,
+              assistant,
+              toolResults: batch.items.map((i) => i.result),
+              messages: options.session.getMessages(),
+            }))
+          ) {
+            return finish(onEvent, {
+              finalText: lastText,
+              turns,
+              stopReason: "should_stop",
+            });
+          }
+
+          pending = (
+            await drainMessages(options.getSteeringMessages)
+          ).map((message) => ({ message, source: "steer" as const }));
+          continue;
+        }
+
+        // Text-only turn — agent may stop unless steering / follow-up arrives.
         await emitEvent(onEvent, {
           type: "turn_end",
-          turn,
+          turn: turns,
           hasToolCalls: false,
           toolCount: 0,
         });
-        return finish(onEvent, {
-          finalText: lastText,
-          turns,
-          stopReason: "completed",
-        });
-      }
 
-      for (const raw of toolCalls) {
-        const parsed = parseToolCall(raw);
-        if (doom.observe(parsed)) {
-          const msg =
-            "Stopped: the same tool was called with the same arguments repeatedly (doom loop).";
-          await emitEvent(onEvent, { type: "error", message: msg });
+        if (
+          options.shouldStopAfterTurn &&
+          (await options.shouldStopAfterTurn({
+            turn: turns,
+            assistant,
+            toolResults: [],
+            messages: options.session.getMessages(),
+          }))
+        ) {
           return finish(onEvent, {
-            finalText: msg,
+            finalText: lastText,
             turns,
-            stopReason: "doom_loop",
+            stopReason: "should_stop",
           });
         }
+
+        pending = (
+          await drainMessages(options.getSteeringMessages)
+        ).map((message) => ({ message, source: "steer" as const }));
       }
 
-      const { items, terminateBatch } = await runToolBatch(toolCalls, {
-        tools: options.tools,
-        workspace: options.workspace,
-        onEvent,
-        beforeToolCall,
-        askPermission: ask,
-        signal: options.signal,
-      });
-
-      for (const message of toolItemsToMessages(items)) {
-        options.session.append(message);
+      // Agent would stop. Drain follow-ups (Pi outer loop).
+      const followUps = await drainMessages(options.getFollowUpMessages);
+      if (followUps.length > 0) {
+        pending = followUps.map((message) => ({
+          message,
+          source: "follow_up" as const,
+        }));
+        continue;
       }
 
-      await emitEvent(onEvent, {
-        type: "turn_end",
-        turn,
-        hasToolCalls: true,
-        toolCount: items.length,
-      });
-
-      if (terminateBatch) {
-        return finish(onEvent, {
-          finalText: lastText || items[items.length - 1]?.result.output || "",
-          turns,
-          stopReason: "tool_terminate",
-        });
-      }
-
-      if (
-        options.shouldStopAfterTurn &&
-        (await options.shouldStopAfterTurn({
-          turn,
-          assistant,
-          toolResults: items.map((i) => i.result),
-          messages: options.session.getMessages(),
-        }))
-      ) {
-        return finish(onEvent, {
-          finalText: lastText,
-          turns,
-          stopReason: "should_stop",
-        });
-      }
+      break;
     }
 
     return finish(onEvent, {
-      finalText: lastText || "Stopped: max turns reached.",
-      turns: options.maxTurns,
-      stopReason: "max_turns",
+      finalText: lastText,
+      turns,
+      stopReason: "completed",
     });
   } catch (err) {
     if (isAbortError(err) || options.signal?.aborted) {
@@ -198,6 +296,13 @@ async function runTurns(
       error: message,
     });
   }
+}
+
+async function drainMessages(
+  getter?: () => Promise<ChatMessage[]> | ChatMessage[],
+): Promise<ChatMessage[]> {
+  if (!getter) return [];
+  return (await getter()) ?? [];
 }
 
 async function callLlm(

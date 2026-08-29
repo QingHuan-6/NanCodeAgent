@@ -13,6 +13,7 @@
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "./agent/index.js";
+import { createDefaultTransformContext } from "./agent/context.js";
 import { createPrinter } from "./cli/printer.js";
 import { runRepl } from "./cli/repl.js";
 import { runSetupWizard } from "./cli/setup.js";
@@ -111,7 +112,9 @@ async function main(): Promise<void> {
     workspace: config.workspace,
     maxTurns: config.maxTurns,
     stream: true,
+    toolExecution: "parallel",
     onEvent: createPrinter(),
+    transformContext: createDefaultTransformContext(),
     askPermission: async (reason, toolName) => {
       if (!input.isTTY) return false;
       const rl = readline.createInterface({ input, output });

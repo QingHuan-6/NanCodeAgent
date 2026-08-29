@@ -29,6 +29,11 @@ export type AgentEvent =
       hasToolCalls: boolean;
       toolCount: number;
     }
+  | {
+      type: "user_message";
+      content: string;
+      source: "prompt" | "steer" | "follow_up";
+    }
   | { type: "message_start" }
   | { type: "message_delta"; text: string }
   | { type: "assistant_message"; content: string | null; toolCallCount: number }
