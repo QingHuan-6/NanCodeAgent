@@ -20,7 +20,7 @@ export interface LlmChatPort {
   chat(
     messages: ChatMessage[],
     tools?: OpenAIToolDefinition[],
-    options?: { signal?: AbortSignal },
+    options?: Pick<ChatRequestOptions, "signal" | "maxTokens" | "temperature">,
   ): Promise<ChatMessage>;
   /**
    * Optional streaming. When present (and stream !== false), the loop prefers this
@@ -66,6 +66,11 @@ export interface AgentLoopOptions {
     args: Record<string, unknown>,
   ) => Promise<BeforeToolCallResult> | BeforeToolCallResult;
   askPermission?: (reason: string, toolName: string) => Promise<boolean>;
+  /** Interactive ask_user tool handler. */
+  askUser?: (req: {
+    question: string;
+    options?: string[];
+  }) => Promise<string>;
   shouldStopAfterTurn?: (ctx: AfterTurnContext) => Promise<boolean> | boolean;
   /** Called once per LLM call; must not throw. Does not mutate session by itself. */
   transformContext?: (
@@ -81,6 +86,11 @@ export interface AgentLoopOptions {
    * Drain follow-up queue when the agent would otherwise stop (no more tools).
    */
   getFollowUpMessages?: () => Promise<ChatMessage[]> | ChatMessage[];
+  /**
+   * Called once when the LLM reports context_length / prompt too long.
+   * Should compact the session in place and return true to retry the call.
+   */
+  onContextOverflow?: () => Promise<boolean> | boolean;
 }
 
 export interface BeforeToolCallResult {

@@ -33,6 +33,12 @@ export interface PermissionRequest {
   resolve: (allow: boolean) => void;
 }
 
+export interface UserQuestionRequest {
+  question: string;
+  options?: string[];
+  resolve: (answer: string) => void;
+}
+
 let seq = 0;
 export function nextId(prefix: string): string {
   seq += 1;
@@ -65,6 +71,19 @@ export function toolSubject(
       const todos = Array.isArray(args.todos) ? args.todos : [];
       return `${todos.length} item${todos.length === 1 ? "" : "s"}`;
     }
+    case "ask_user":
+      return clip(String(args.question ?? "question"), 70);
+    case "web_fetch":
+      return clip(String(args.url ?? ""), 70);
+    case "web_search":
+      return clip(String(args.query ?? ""), 70);
+    case "lsp":
+      return clip(
+        `${args.operation ?? "lsp"} ${args.path ?? ""}${
+          args.line != null ? `:${args.line}` : ""
+        }`,
+        70,
+      );
     default:
       return clip(JSON.stringify(args), 70);
   }
@@ -87,6 +106,14 @@ export function toolRunningLabel(toolName: string, subject: string): string {
       return `Running ${subject}`;
     case "todo_write":
       return `Updating todos (${subject})`;
+    case "ask_user":
+      return `Asking user: ${subject}`;
+    case "web_fetch":
+      return `Fetching ${subject}`;
+    case "web_search":
+      return `Searching web for ${subject}`;
+    case "lsp":
+      return `LSP ${subject}`;
     default:
       return `Running ${toolName} ${subject}`.trim();
   }
@@ -124,6 +151,14 @@ export function toolDoneLabel(
       return `Ran ${subject}${bashHint(output)}`;
     case "todo_write":
       return `Updated todos (${subject})`;
+    case "ask_user":
+      return `Asked user: ${subject}`;
+    case "web_fetch":
+      return `Fetched ${subject}`;
+    case "web_search":
+      return `Searched web for ${subject}`;
+    case "lsp":
+      return `LSP ${subject}`;
     default:
       return `Finished ${toolName}${subject ? ` ${subject}` : ""}`;
   }

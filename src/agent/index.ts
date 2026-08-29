@@ -18,5 +18,12 @@ export {
   estimateMessagesChars,
   groupMessageBlocks,
 } from "./context.js";
+export {
+  prepareCompact,
+  compactMessages,
+  buildPostCompactMessages,
+  formatTranscriptForSummary,
+} from "./compact.js";
+export type { CompactOptions, CompactResult } from "./compact.js";
 export { PendingMessageQueue } from "./queue.js";
 export type { QueueMode } from "./queue.js";

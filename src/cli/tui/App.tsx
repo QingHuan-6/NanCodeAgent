@@ -22,6 +22,7 @@ import {
   type PermissionRequest,
   type StatusState,
   type TimelineItem,
+  type UserQuestionRequest,
 } from "./types.js";
 
 export interface TuiAppProps {
@@ -61,6 +62,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
+  const [userQuestion, setUserQuestion] = useState<UserQuestionRequest | null>(
+    null,
+  );
   const [todos, setTodos] = useState<TodoItem[]>([]);
 
   const streamBufRef = useRef("");
@@ -214,6 +218,29 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     [],
   );
 
+  const askUser = useCallback(
+    (req: {
+      question: string;
+      options?: string[];
+    }): Promise<string> => {
+      return new Promise((resolve) => {
+        setStatus({ phase: "ask", detail: "ask_user" });
+        setInput("");
+        setUserQuestion({
+          question: req.question,
+          options: req.options,
+          resolve: (answer) => {
+            setUserQuestion(null);
+            setInput("");
+            setStatus({ phase: "tool", detail: "ask_user" });
+            resolve(answer);
+          },
+        });
+      });
+    },
+    [],
+  );
+
   const getRuntime = useCallback((): AgentRuntime => {
     if (
       !runtimeRef.current ||
@@ -228,13 +255,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         session,
         onEvent,
         askPermission,
+        askUser,
       });
     } else {
       runtimeRef.current.onEvent = onEvent;
       runtimeRef.current.askPermission = askPermission;
+      runtimeRef.current.askUser = askUser;
     }
     return runtimeRef.current;
-  }, [config, llm, toolsReg, session, onEvent, askPermission]);
+  }, [config, llm, toolsReg, session, onEvent, askPermission, askUser]);
 
   const runPrompt = useCallback(
     async (task: string) => {
@@ -373,7 +402,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             pushItem({
               id: nextId("sys"),
               kind: "system",
-              text: "Plan mode on — read_file / glob / grep / todo_write.",
+              text: "Plan mode on — read/glob/grep/todo/ask/web/lsp (no writes).",
             });
           } catch (err) {
             pushItem({
@@ -410,12 +439,28 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           await runContinue();
           return true;
         case "compact": {
-          const { removed } = runtime.compact();
-          pushItem({
-            id: nextId("sys"),
-            kind: "system",
-            text: `Compacted (removed ~${removed} messages).`,
-          });
+          try {
+            const result = await runtime.compact({
+              customInstructions: slash.instructions,
+            });
+            const detail =
+              result.mode === "llm"
+                ? `LLM summary (${result.summaryChars} chars), removed ~${result.removed} messages`
+                : result.mode === "prune"
+                  ? `Pruned ~${result.removed} messages (summarizer fallback)`
+                  : "Nothing to compact";
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: `Compacted — ${detail}.`,
+            });
+          } catch (err) {
+            pushItem({
+              id: nextId("err"),
+              kind: "error",
+              text: err instanceof Error ? err.message : String(err),
+            });
+          }
           return true;
         }
         case "sessions": {
@@ -489,7 +534,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const submit = useCallback(
     async (raw: string) => {
       const trimmed = raw.trim();
-      if (!trimmed || permission) return;
+      if (!trimmed || permission || userQuestion) return;
       setInput("");
       if (trimmed.startsWith("/")) {
         await handleSlash(trimmed);
@@ -497,7 +542,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
       await runPrompt(trimmed);
     },
-    [permission, handleSlash, runPrompt],
+    [permission, userQuestion, handleSlash, runPrompt],
   );
 
   useInput((ch, key) => {
@@ -509,6 +554,40 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       if (ch === "n" || ch === "N" || key.return || key.escape) {
         permission.resolve(false);
         return;
+      }
+      return;
+    }
+
+    if (userQuestion) {
+      const opts = userQuestion.options;
+      if (opts && opts.length > 0 && ch && /^[1-8]$/.test(ch) && !input) {
+        const idx = Number(ch) - 1;
+        if (idx >= 0 && idx < opts.length) {
+          userQuestion.resolve(opts[idx]!);
+          return;
+        }
+      }
+      if (key.return) {
+        const answer = input.trim();
+        if (answer) {
+          userQuestion.resolve(answer);
+        }
+        return;
+      }
+      if (key.escape) {
+        userQuestion.resolve("(user dismissed the question)");
+        return;
+      }
+      if (key.ctrl && ch === "j") {
+        setInput((v) => `${v}\n`);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setInput((v) => v.slice(0, -1));
+        return;
+      }
+      if (ch && !key.ctrl && !key.meta) {
+        setInput((v) => v + ch);
       }
       return;
     }
@@ -560,7 +639,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       case "tool":
         return `Tools · ${status.detail ?? ""}`;
       case "ask":
-        return `Permission: ${status.detail}`;
+        return status.detail === "ask_user"
+          ? "Waiting for your answer…"
+          : `Permission: ${status.detail}`;
       default:
         return busy ? "Busy · enter steers" : "Ready";
     }
@@ -631,6 +712,43 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               Allow {permission.toolName}? {permission.reason}
             </Text>
             <Text dimColor>[y] allow · [n] deny</Text>
+          </Box>
+        ) : userQuestion ? (
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor={theme.tool}
+            paddingX={1}
+          >
+            <Text color={theme.tool} bold>
+              Question
+            </Text>
+            <Text>{userQuestion.question}</Text>
+            {userQuestion.options?.map((opt, i) => (
+              <Text key={`${i}-${opt}`} dimColor>
+                {"  "}
+                [{i + 1}] {opt}
+              </Text>
+            ))}
+            <Box marginTop={1}>
+              <Text color={theme.brand}>{"> "}</Text>
+              <Text>
+                {input.length > 0 ? input : ""}
+                {input.length === 0 ? (
+                  <Text dimColor>
+                    {userQuestion.options?.length
+                      ? "1–8 or type answer…"
+                      : "type answer…"}
+                  </Text>
+                ) : null}
+              </Text>
+              <Text color={theme.brand}>█</Text>
+            </Box>
+            <Text dimColor>
+              Enter submit
+              {userQuestion.options?.length ? " · digit picks option" : ""}
+              {" · Esc skip"}
+            </Text>
           </Box>
         ) : (
           <Box

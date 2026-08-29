@@ -1,10 +1,17 @@
 import type { ToolUiMeta } from "../agent/events.js";
 import type { OpenAIToolDefinition, ToolParameterSchema } from "../llm/types.js";
 
+export interface AskUserRequest {
+  question: string;
+  options?: string[];
+}
+
 export interface ToolContext {
   workspace: string;
   /** Session id for todo_write and other session-scoped tools. */
   sessionId?: string;
+  /** Interactive Q&A (ask_user tool). */
+  askUser?: (req: AskUserRequest) => Promise<string>;
 }
 
 export interface ToolResult {

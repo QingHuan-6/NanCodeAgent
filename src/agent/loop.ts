@@ -1,4 +1,5 @@
 import type { ChatMessage, OpenAIToolDefinition } from "../llm/types.js";
+import { LlmError } from "../llm/errors.js";
 import { DoomLoopGuard } from "./doom-loop.js";
 import { emitEvent, noopEvents } from "./events.js";
 import { buildSystemPrompt } from "./prompt.js";
@@ -74,6 +75,11 @@ async function runTurns(
   onEvent: NonNullable<AgentLoopOptions["onEvent"]>,
 ): Promise<AgentLoopResult> {
   const ask = options.askPermission ?? (async () => false);
+  const askUser =
+    options.askUser ??
+    (async () => {
+      throw new Error("ask_user is not available in this session");
+    });
   const beforeToolCall =
     options.beforeToolCall ?? defaultBeforeToolCall(options.workspace);
   const doom = new DoomLoopGuard(options.doomLoopThreshold ?? 3);
@@ -124,14 +130,38 @@ async function runTurns(
           ? await options.transformContext(rawMessages, options.signal)
           : rawMessages;
 
-        const assistant = await callLlm(
-          options.llm,
-          contextMessages,
-          options.tools.toOpenAITools(),
-          onEvent,
-          options.signal,
-          options.stream !== false,
-        );
+        let assistant: ChatMessage;
+        try {
+          assistant = await callLlm(
+            options.llm,
+            contextMessages,
+            options.tools.toOpenAITools(),
+            onEvent,
+            options.signal,
+            options.stream !== false,
+          );
+        } catch (err) {
+          if (
+            isContextLengthError(err) &&
+            options.onContextOverflow &&
+            (await options.onContextOverflow())
+          ) {
+            const retryRaw = options.session.getMessages();
+            const retryCtx = options.transformContext
+              ? await options.transformContext(retryRaw, options.signal)
+              : retryRaw;
+            assistant = await callLlm(
+              options.llm,
+              retryCtx,
+              options.tools.toOpenAITools(),
+              onEvent,
+              options.signal,
+              options.stream !== false,
+            );
+          } else {
+            throw err;
+          }
+        }
         options.session.append(assistant);
 
         if (assistant.content) {
@@ -176,6 +206,7 @@ async function runTurns(
             onEvent,
             beforeToolCall,
             askPermission: ask,
+            askUser,
             signal: options.signal,
             toolExecution: options.toolExecution ?? "parallel",
           });
@@ -373,6 +404,12 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
+}
+
+function isContextLengthError(err: unknown): boolean {
+  if (err instanceof LlmError && err.code === "context_length") return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /context[_ ]length|prompt is too long|maximum context/i.test(msg);
 }
 
 /** @deprecated Prefer importing from ./types.js — re-exported for convenience. */

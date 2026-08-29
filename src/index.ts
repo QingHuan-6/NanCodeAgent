@@ -129,6 +129,34 @@ async function main(): Promise<void> {
         rl.close();
       }
     },
+    askUser: async (req) => {
+      if (!input.isTTY) {
+        return "(ask_user unavailable: non-interactive one-shot)";
+      }
+      const rl = readline.createInterface({ input, output });
+      try {
+        console.log(`\n[question] ${req.question}`);
+        if (req.options?.length) {
+          for (let i = 0; i < req.options.length; i++) {
+            console.log(`  [${i + 1}] ${req.options[i]}`);
+          }
+          const answer = (await rl.question("Answer (number or text): ")).trim();
+          const n = Number(answer);
+          if (
+            answer &&
+            Number.isInteger(n) &&
+            n >= 1 &&
+            n <= req.options.length
+          ) {
+            return req.options[n - 1]!;
+          }
+          return answer || "(empty)";
+        }
+        return (await rl.question("Answer: ")).trim() || "(empty)";
+      } finally {
+        rl.close();
+      }
+    },
   });
 }
 

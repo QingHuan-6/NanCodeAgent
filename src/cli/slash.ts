@@ -9,7 +9,7 @@ export type SlashAction =
   | { type: "status" }
   | { type: "setup" }
   | { type: "continue" }
-  | { type: "compact" }
+  | { type: "compact"; instructions?: string }
   | { type: "resume"; id?: string }
   | { type: "sessions" }
   | { type: "plan" }
@@ -44,7 +44,9 @@ export function parseSlashCommand(line: string): SlashAction | null {
     case "cont":
       return { type: "continue" };
     case "compact":
-      return { type: "compact" };
+      return arg
+        ? { type: "compact", instructions: arg }
+        : { type: "compact" };
     case "resume":
       return { type: "resume", id: arg || undefined };
     case "sessions":
@@ -66,11 +68,11 @@ export function helpText(): string {
     "Commands:",
     "  /help       Show this help",
     "  /status     Session / model / workspace / mode",
-    "  /plan       Read-only plan mode (read/glob/grep + todo_write)",
-    "  /agent      Full agent mode (write/edit/bash enabled)",
+    "  /plan       Read-only plan mode (read/glob/grep/todo/ask/web/lsp)",
+    "  /agent      Full agent mode (write/edit/bash + ask/web/lsp)",
     "  /setup      Re-run API key / provider setup",
     "  /clear      Clear conversation history",
-    "  /compact    Prune older context",
+    "  /compact    Summarize older context (optional: /compact focus on auth)",
     "  /continue   Resume loop from last user/tool message",
     "  /sessions   List saved session ids",
     "  /resume id  Load a saved session",

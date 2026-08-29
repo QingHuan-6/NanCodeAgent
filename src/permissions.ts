@@ -35,6 +35,17 @@ export function checkPermission(req: PermissionRequest): PermissionResult {
     }
   }
 
+  if (req.toolName === "web_fetch" && typeof req.args.url === "string") {
+    try {
+      const u = new URL(req.args.url);
+      if (u.protocol !== "http:" && u.protocol !== "https:") {
+        return { decision: "deny", reason: "Only http(s) URLs allowed" };
+      }
+    } catch {
+      return { decision: "deny", reason: "Invalid URL" };
+    }
+  }
+
   return { decision: "allow" };
 }
 

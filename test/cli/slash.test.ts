@@ -20,6 +20,10 @@ describe("slash commands", () => {
     expect(parseSlashCommand("/config")).toEqual({ type: "setup" });
     expect(parseSlashCommand("/continue")).toEqual({ type: "continue" });
     expect(parseSlashCommand("/compact")).toEqual({ type: "compact" });
+    expect(parseSlashCommand("/compact focus on auth")).toEqual({
+      type: "compact",
+      instructions: "focus on auth",
+    });
     expect(parseSlashCommand("/plan")).toEqual({ type: "plan" });
     expect(parseSlashCommand("/agent")).toEqual({ type: "agent" });
     expect(parseSlashCommand("/resume abc")).toEqual({

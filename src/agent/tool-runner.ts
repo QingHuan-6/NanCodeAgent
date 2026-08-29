@@ -26,6 +26,11 @@ export interface RunToolBatchOptions {
     args: Record<string, unknown>,
   ) => Promise<BeforeToolCallResult> | BeforeToolCallResult;
   askPermission: (reason: string, toolName: string) => Promise<boolean>;
+  /** Interactive ask_user tool. */
+  askUser?: (req: {
+    question: string;
+    options?: string[];
+  }) => Promise<string>;
   signal?: AbortSignal;
   /** Default parallel (Pi). */
   toolExecution?: ToolExecutionMode;
@@ -53,7 +58,14 @@ export async function runToolBatch(
   toolCalls: ToolCall[],
   options: RunToolBatchOptions,
 ): Promise<{ items: ToolBatchItem[]; terminateBatch: boolean }> {
-  const mode = options.toolExecution ?? "parallel";
+  // ask_user must not race with other tools in the same batch.
+  const needsSequential =
+    options.toolExecution === "sequential" ||
+    toolCalls.some((c) => c.function?.name === "ask_user");
+
+  const mode = needsSequential
+    ? "sequential"
+    : (options.toolExecution ?? "parallel");
   if (mode === "sequential") {
     return runSequential(toolCalls, options);
   }
@@ -159,6 +171,7 @@ async function executeOne(
   const result = await options.tools.run(call.name, call.args, {
     workspace: options.workspace,
     sessionId: options.sessionId,
+    askUser: options.askUser,
   });
   const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
   const item: ToolBatchItem = { call, result, isError };

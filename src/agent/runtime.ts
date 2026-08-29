@@ -1,6 +1,6 @@
 /**
  * Stateful wrapper around the agent loop.
- * Owns steering / follow-up queues, abort, mode, and default context prune.
+ * Owns steering / follow-up queues, abort, mode, and context compact/prune.
  */
 
 import type { Config } from "../config/index.js";
@@ -14,8 +14,13 @@ import {
 } from "../tools/index.js";
 import type { AgentEventHandler } from "./events.js";
 import {
-  compactMessagesInPlace,
+  compactMessages,
+  type CompactOptions,
+  type CompactResult,
+} from "./compact.js";
+import {
   createDefaultTransformContext,
+  estimateMessagesChars,
 } from "./context.js";
 import { continueAgentLoop, runAgentLoop } from "./loop.js";
 import { buildSystemPrompt } from "./prompt.js";
@@ -33,12 +38,18 @@ export interface AgentRuntimeOptions {
   session: Session;
   onEvent?: AgentEventHandler;
   askPermission?: AgentLoopOptions["askPermission"];
+  askUser?: AgentLoopOptions["askUser"];
   toolExecution?: ToolExecutionMode;
   steeringMode?: QueueMode;
   followUpMode?: QueueMode;
   mode?: AgentToolMode;
   /** Context prune char budget (default 120_000). */
   contextMaxChars?: number;
+  /**
+   * Auto LLM-compact when non-system chars exceed this fraction of contextMaxChars
+   * (default 0.85). Set 0 to disable.
+   */
+  autoCompactRatio?: number;
 }
 
 export class AgentRuntime {
@@ -48,6 +59,7 @@ export class AgentRuntime {
   session: Session;
   onEvent?: AgentEventHandler;
   askPermission?: AgentLoopOptions["askPermission"];
+  askUser?: AgentLoopOptions["askUser"];
   toolExecution: ToolExecutionMode;
   mode: AgentToolMode;
 
@@ -57,6 +69,10 @@ export class AgentRuntime {
   private running = false;
   private skipInitialSteeringPoll = false;
   private readonly contextMaxChars: number;
+  private readonly autoCompactRatio: number;
+  /** One auto-compact per prompt/continue lifecycle. */
+  private autoCompactUsed = false;
+  private overflowCompactUsed = false;
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -65,6 +81,7 @@ export class AgentRuntime {
     this.session = options.session;
     this.onEvent = options.onEvent;
     this.askPermission = options.askPermission;
+    this.askUser = options.askUser;
     this.toolExecution = options.toolExecution ?? "parallel";
     this.mode = options.mode ?? "agent";
     this.steeringQueue = new PendingMessageQueue(
@@ -74,6 +91,7 @@ export class AgentRuntime {
       options.followUpMode ?? "one-at-a-time",
     );
     this.contextMaxChars = options.contextMaxChars ?? 120_000;
+    this.autoCompactRatio = options.autoCompactRatio ?? 0.85;
   }
 
   get isRunning(): boolean {
@@ -165,13 +183,29 @@ export class AgentRuntime {
     }
   }
 
-  compact(maxChars = 40_000): { removed: number } {
-    const { messages, removed } = compactMessagesInPlace(
+  /**
+   * Summarize older history with the LLM (fallback: prune).
+   * Safe cut points — never splits tool_call pairs.
+   */
+  async compact(
+    options: CompactOptions & { keepRecentChars?: number } = {},
+  ): Promise<CompactResult> {
+    const result = await compactMessages(
       this.session.getMessages(),
-      { maxChars, preserveRecentBlocks: 6 },
+      this.llm,
+      {
+        keepRecentChars: options.keepRecentChars ?? 20_000,
+        customInstructions: options.customInstructions,
+        sessionId: this.session.id,
+        signal: options.signal ?? this.activeAbort?.signal,
+        pruneOnly: options.pruneOnly,
+        pruneMaxChars: options.pruneMaxChars ?? 40_000,
+      },
     );
-    this.session.replaceMessages(messages);
-    return { removed };
+    if (result.mode !== "noop") {
+      this.session.replaceMessages(result.messages);
+    }
+    return result;
   }
 
   private refreshSystemPrompt(): void {
@@ -190,6 +224,8 @@ export class AgentRuntime {
     executor: (signal: AbortSignal) => Promise<AgentLoopResult>,
   ): Promise<AgentLoopResult> {
     this.running = true;
+    this.autoCompactUsed = false;
+    this.overflowCompactUsed = false;
     const ac = new AbortController();
     this.activeAbort = ac;
     try {
@@ -202,6 +238,10 @@ export class AgentRuntime {
 
   private buildLoopOptions(signal: AbortSignal): AgentLoopOptions {
     let skipInitial = this.skipInitialSteeringPoll;
+    const prune = createDefaultTransformContext({
+      maxChars: this.contextMaxChars,
+    });
+
     return {
       llm: this.llm,
       tools: this.tools,
@@ -213,10 +253,37 @@ export class AgentRuntime {
       mode: this.mode,
       onEvent: this.onEvent,
       askPermission: this.askPermission,
+      askUser: this.askUser,
       signal,
-      transformContext: createDefaultTransformContext({
-        maxChars: this.contextMaxChars,
-      }),
+      transformContext: async (messages, sig) => {
+        const rest = messages.filter((m) => m.role !== "system");
+        const chars = estimateMessagesChars(rest);
+        const threshold = Math.floor(
+          this.contextMaxChars * this.autoCompactRatio,
+        );
+        if (
+          this.autoCompactRatio > 0 &&
+          !this.autoCompactUsed &&
+          chars > threshold
+        ) {
+          this.autoCompactUsed = true;
+          await this.compact({
+            keepRecentChars: 20_000,
+            signal: sig,
+          });
+          return prune(this.session.getMessages());
+        }
+        return prune(messages);
+      },
+      onContextOverflow: async () => {
+        if (this.overflowCompactUsed) return false;
+        this.overflowCompactUsed = true;
+        const result = await this.compact({
+          keepRecentChars: 12_000,
+          signal,
+        });
+        return result.mode !== "noop";
+      },
       getSteeringMessages: async () => {
         if (skipInitial) {
           skipInitial = false;

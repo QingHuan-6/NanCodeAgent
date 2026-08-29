@@ -6,7 +6,7 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + tool-output spill + session resume.
+Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + LLM /compact + tool-output spill + session resume.
 
 ## Setup
 
@@ -50,8 +50,9 @@ Inside TUI / REPL: `/help` `/status` `/plan` `/agent` `/clear` `/compact` `/cont
 While busy in TUI: **Enter steers** (injects after current tools); Esc aborts.  
 Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
 
-**Modes:** `/plan` = read-only (read/glob/grep + todo_write). `/agent` = full tools (write/edit/bash + todo_write).  
+**Modes:** `/plan` = read-only (read/glob/grep + todo/ask/web/lsp). `/agent` = full tools (write/edit/bash + the same).  
 Multi-step work: the model can call `todo_write` to keep a live checklist (shown above the prompt).  
+Clarifying questions: `ask_user` (TUI options / free text). Public docs: `web_search` + `web_fetch` (SSRF-blocked). Code intel: `lsp` (TS/JS via typescript-language-server, Python via pyright — first call may `npx` download).  
 Large tool output is saved under `.nan/tool-output/` with a short summary returned to the model.
 
 ### Use from any folder (global)
@@ -89,15 +90,16 @@ src/
   index.ts          CLI entry (setup / TUI / plain / one-shot)
   config/           runtime config + ~/.nan-agent .env
   llm/              OpenAI-compatible client (+ SSE stream)
-  tools/            read/write/edit/bash/glob/grep/todo_write (+ spill)
+  tools/            read/write/edit/bash/glob/grep/todo/ask/web/lsp (+ spill)
   agent/            loop, runtime, prompt, events
   session/          message history + resume + todos
+  lsp/              minimal stdio LSP client
   permissions.ts    workspace gate
   cli/              printer, REPL, TUI, slash, setup
 test/               Vitest suite
 ```
 
-Not in scope for this harness (product-scale): MCP, LSP, web fetch, notebooks, skills, sub-agents.
+Not in scope for this harness (product-scale): MCP, notebooks, skills, sub-agents.
 ## Secrets
 
 API keys live in environment, project `.env`, or `~/.nan-agent/.env` — never in the git repo.

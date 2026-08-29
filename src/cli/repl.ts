@@ -26,6 +26,7 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
 
   const rl = readline.createInterface({ input, output, terminal: true });
   const askPermission = createAskPermission(rl);
+  const askUser = createAskUser(rl);
   const printer = createPrinter({ compact: true });
 
   const runtime = new AgentRuntime({
@@ -35,6 +36,7 @@ export async function runRepl(ctx: ReplContext): Promise<void> {
     session: ctx.session,
     onEvent: printer,
     askPermission,
+    askUser,
   });
 
   try {
@@ -83,6 +85,32 @@ function createAskPermission(
       .trim()
       .toLowerCase();
     return answer === "y" || answer === "yes";
+  };
+}
+
+function createAskUser(
+  rl: readline.Interface,
+): NonNullable<AgentLoopOptions["askUser"]> {
+  return async (req) => {
+    console.log(`\n[question] ${req.question}`);
+    if (req.options?.length) {
+      for (let i = 0; i < req.options.length; i++) {
+        console.log(`  [${i + 1}] ${req.options[i]}`);
+      }
+      const answer = (await rl.question("Answer (number or text): ")).trim();
+      const n = Number(answer);
+      if (
+        answer &&
+        Number.isInteger(n) &&
+        n >= 1 &&
+        n <= req.options.length
+      ) {
+        return req.options[n - 1]!;
+      }
+      return answer || "(empty)";
+    }
+    const answer = (await rl.question("Answer: ")).trim();
+    return answer || "(empty)";
   };
 }
 
@@ -139,15 +167,25 @@ async function handleSlash(
       }
       return false;
     case "compact": {
-      const { removed } = runtime.compact();
-      console.log(`Compacted (removed ~${removed} messages).`);
+      const result = await runtime.compact({
+        customInstructions: slash.instructions,
+      });
+      const detail =
+        result.mode === "llm"
+          ? `LLM summary (${result.summaryChars} chars), removed ~${result.removed} messages`
+          : result.mode === "prune"
+            ? `Pruned ~${result.removed} messages (summarizer fallback)`
+            : "Nothing to compact";
+      console.log(`Compacted — ${detail}.`);
       return false;
     }
     case "plan":
       try {
         runtime.setMode("plan");
         ctx.tools = runtime.tools;
-        console.log("Plan mode: read_file / glob / grep / todo_write (no writes).");
+        console.log(
+          "Plan mode: read/glob/grep/todo/ask/web/lsp (no writes).",
+        );
       } catch (err) {
         console.error(`[error] ${err instanceof Error ? err.message : err}`);
       }
