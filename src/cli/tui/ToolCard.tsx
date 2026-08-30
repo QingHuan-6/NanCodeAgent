@@ -1,39 +1,32 @@
-import React from "react";
-import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
-import { DiffBlock } from "./DiffBlock.js";
-import { theme } from "./theme.js";
+import type { ReactNode } from "react";
 import {
   toolDoneLabel,
   toolRunningLabel,
   type TimelineItem,
 } from "./types.js";
+import { theme } from "./theme.js";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
-/**
- * Activity-log tool row:
- *   • Searching for "def " in *.py
- *   • Searched for "def " in *.py · 15 matches  ▶
- * Full output only when expanded (Ctrl+O).
- */
+/** One-line activity row; output opens in ToolDetailPanel. */
 export function ToolCard({
   card,
   focused,
+  detailOpen,
 }: {
   card: ToolItem;
   focused: boolean;
-}): React.ReactElement {
+  detailOpen?: boolean;
+}): ReactNode {
   const bullet = focused ? "●" : "•";
 
   if (card.status === "running") {
     return (
-      <Box marginLeft={1}>
-        <Text color={theme.tool}>
-          {bullet} <Spinner type="dots" />{" "}
-          {toolRunningLabel(card.toolName, card.subject)}
-        </Text>
-      </Box>
+      <box marginLeft={1}>
+        <text fg={theme.tool}>
+          {`${bullet} … ${toolRunningLabel(card.toolName, card.subject)}`}
+        </text>
+      </box>
     );
   }
 
@@ -47,35 +40,10 @@ export function ToolCard({
   );
 
   return (
-    <Box flexDirection="column" marginLeft={1}>
-      <Text color={ok ? theme.dim : theme.error}>
-        {bullet} {label}
-        {hasBody ? (card.expanded ? "  ▼" : "  ▶") : ""}
-      </Text>
-
-      {card.expanded && card.diff ? <DiffBlock diff={card.diff} /> : null}
-      {card.expanded && !card.diff && card.output ? (
-        <Box flexDirection="column" marginLeft={3}>
-          {truncateLines(card.output, 40).map((line, i) => (
-            <Text
-              key={`${card.id}-l-${i}`}
-              dimColor={ok}
-              color={ok ? undefined : theme.error}
-            >
-              {line || " "}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-    </Box>
+    <box marginLeft={1}>
+      <text fg={ok ? theme.dim : theme.error}>
+        {`${bullet} ${label}${hasBody ? (focused && detailOpen ? "  ▼" : "  ▶") : ""}`}
+      </text>
+    </box>
   );
-}
-
-function truncateLines(text: string, maxLines: number): string[] {
-  const lines = text.split(/\r?\n/);
-  if (lines.length <= maxLines) return lines;
-  return [
-    ...lines.slice(0, maxLines),
-    `… (${lines.length - maxLines} more lines)`,
-  ];
 }

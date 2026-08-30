@@ -22,7 +22,13 @@ export type {
   StopReason,
   ToolExecutionMode,
 } from "./types.js";
-export type { AgentEvent, AgentEventHandler } from "./events.js";
+export type {
+  AgentEvent,
+  AgentEventHandler,
+  ToolUiDiff,
+  ToolUiDiffLine,
+  ToolUiMeta,
+} from "./events.js";
 export { noopEvents } from "./events.js";
 export { buildSystemPrompt, loadProjectInstructions } from "./prompt.js";
 export { DoomLoopGuard } from "./doom-loop.js";
@@ -45,3 +51,17 @@ export {
 export type { CompactOptions, CompactResult } from "./compact.js";
 export { PendingMessageQueue } from "./queue.js";
 export type { QueueMode } from "./queue.js";
+export {
+  buildContextEstimate,
+  estimateContextTokens,
+  formatContextBreakdown,
+  formatContextLine,
+  resolveContextWindowConfig,
+  roughTokenEstimate,
+  roughTokensForMessage,
+  roughTokensForMessages,
+} from "./tokens.js";
+export type {
+  ContextEstimate,
+  ContextWindowConfig,
+} from "./tokens.js";

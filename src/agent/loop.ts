@@ -1,8 +1,16 @@
-import type { ChatMessage, OpenAIToolDefinition } from "../llm/types.js";
+import type {
+  ChatMessage,
+  OpenAIToolDefinition,
+  Usage,
+} from "../llm/types.js";
 import { LlmError } from "../llm/errors.js";
 import { DoomLoopGuard } from "./doom-loop.js";
 import { emitEvent, noopEvents } from "./events.js";
 import { buildSystemPrompt } from "./prompt.js";
+import {
+  buildContextEstimate,
+  resolveContextWindowConfig,
+} from "./tokens.js";
 import {
   defaultBeforeToolCall,
   parseToolCall,
@@ -131,15 +139,16 @@ async function runTurns(
           : rawMessages;
 
         let assistant: ChatMessage;
+        let usage: Usage | undefined;
         try {
-          assistant = await callLlm(
+          ({ message: assistant, usage } = await callLlm(
             options.llm,
             contextMessages,
             options.tools.toOpenAITools(),
             onEvent,
             options.signal,
             options.stream !== false,
-          );
+          ));
         } catch (err) {
           if (
             isContextLengthError(err) &&
@@ -150,19 +159,34 @@ async function runTurns(
             const retryCtx = options.transformContext
               ? await options.transformContext(retryRaw, options.signal)
               : retryRaw;
-            assistant = await callLlm(
+            ({ message: assistant, usage } = await callLlm(
               options.llm,
               retryCtx,
               options.tools.toOpenAITools(),
               onEvent,
               options.signal,
               options.stream !== false,
-            );
+            ));
           } else {
             throw err;
           }
         }
         options.session.append(assistant);
+        if (usage) {
+          const assistantIndex = options.session.messageCount() - 1;
+          options.session.recordUsage(usage, assistantIndex);
+          const estimate = buildContextEstimate(
+            options.session.getMessages(),
+            usage,
+            assistantIndex,
+            resolveContextWindowConfig(),
+          );
+          await emitEvent(onEvent, {
+            type: "context_usage",
+            usage,
+            estimate,
+          });
+        }
 
         if (assistant.content) {
           lastText = assistant.content;
@@ -355,24 +379,41 @@ async function callLlm(
   onEvent: NonNullable<AgentLoopOptions["onEvent"]>,
   signal: AbortSignal | undefined,
   preferStream: boolean,
-): Promise<ChatMessage> {
+): Promise<{ message: ChatMessage; usage?: Usage }> {
   if (preferStream && typeof llm.streamChat === "function") {
     await emitEvent(onEvent, { type: "message_start" });
     let final: ChatMessage | undefined;
-    for await (const event of llm.streamChat(messages, { tools, signal })) {
+    let usage: Usage | undefined;
+    for await (const event of llm.streamChat(messages, {
+      tools,
+      signal,
+      includeUsage: true,
+    })) {
       if (event.type === "text_delta" && event.text) {
         await emitEvent(onEvent, { type: "message_delta", text: event.text });
       } else if (event.type === "done") {
         final = event.result.message;
+        usage = event.result.usage;
       }
     }
     if (!final) {
       throw new Error("LLM stream ended without a final message");
     }
-    return final;
+    return { message: final, usage };
   }
 
-  return llm.chat(messages, tools, { signal });
+  const withResult = llm as LlmChatPort & {
+    chatResult?: (
+      messages: ChatMessage[],
+      options?: { tools?: OpenAIToolDefinition[]; signal?: AbortSignal },
+    ) => Promise<{ message: ChatMessage; usage?: Usage }>;
+  };
+  if (typeof withResult.chatResult === "function") {
+    const result = await withResult.chatResult(messages, { tools, signal });
+    return { message: result.message, usage: result.usage };
+  }
+
+  return { message: await llm.chat(messages, tools, { signal }) };
 }
 
 function ensureSystemMessage(options: AgentLoopOptions): void {

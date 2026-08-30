@@ -6,14 +6,19 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + **skills** + **subagents (`task`)** + **file memory** + light TUI markdown + LLM /compact + tool-output spill + session resume.
+Interactive OpenTUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + **skills** + **subagents (`task`)** + **file memory** + light TUI markdown + LLM /compact + tool-output spill + session resume.
 
 ## Setup
 
+**TUI (OpenTUI) needs Node.js ≥ 26.4** (or Bun). `nan-agent` / `npm run dev` will auto-enable `--experimental-ffi`.
+
 ```bash
+node -v   # expect v26.4+
 git clone <your-repo-url> NanCodeAgent
 cd NanCodeAgent
 npm install
+npm run build
+npm run link:global   # optional: run `nan-agent` anywhere
 npm run dev
 ```
 
@@ -46,8 +51,10 @@ npm run dev -- --plain
 npm run dev -- "Create a hello.py that prints hi"
 ```
 
-Inside TUI / REPL: `/help` `/status` `/memory` `/memory on|off` `/plan` `/agent` `/clear` `/compact` `/continue` `/sessions` `/resume` `/exit`  
+Inside TUI / REPL: `/help` `/status` `/context` `/memory` `/memory on|off` `/plan` `/agent` `/clear` `/compact` `/continue` `/sessions` `/resume` `/exit`  
 While busy in TUI: **Enter steers** (injects after current tools); Esc aborts.  
+TUI uses **OpenTUI** (same toolkit as OpenCode): sticky `ScrollBox` transcript, mouse-wheel scroll, `Ctrl+O` tool detail pane, `Ctrl+P`/`N` tool focus.  
+Footer shows `model · mode · ctx ~N%`. `/resume` rebuilds the transcript from the session file.  
 Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
 
 **Modes:** `/plan` = read-only (read/glob/grep + todo/ask/web/lsp/skill + `task` explorer). `/agent` = full tools (write/edit/bash + the same + `task` worker).  
@@ -68,7 +75,8 @@ Clarifying questions: `ask_user` (TUI options / free text). Public docs: `web_se
 ```
 
 HTTP bases must serve `index.json` (`name` / `version` / `files`); Nan caches under `~/.nan-agent/skills-cache/` and refreshes when `version` changes. Or ask the agent: `用 skill_install 安装 https://…/skills/`（可用 `global: true`）. Env: `NAN_SKILL_SOURCES`.  
-Large tool output is saved under `.nan/tool-output/` with a short summary returned to the model.
+Large tool output is saved under `.nan/tool-output/` with a short summary returned to the model.  
+**Context size:** API `usage` anchors the estimate; newer messages use chars÷4 (JSON denser). Auto-compact triggers near `NAN_CONTEXT_TOKENS`−`NAN_CONTEXT_RESERVE` (defaults 128k / 8k). See `/context`.
 
 ### Use from any folder (global)
 

@@ -1,6 +1,6 @@
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { AgentRuntime } from "../agent/index.js";
+import { AgentRuntime, formatContextBreakdown, formatContextLine } from "../agent/index.js";
 import type { AgentLoopOptions } from "../agent/types.js";
 import { loadConfig, type Config } from "../config/index.js";
 import { LlmClient } from "../llm/client.js";
@@ -144,7 +144,16 @@ async function handleSlash(
           `base_url:  ${ctx.config.baseUrl}`,
           `workspace: ${ctx.config.workspace}`,
           `max_turns: ${ctx.config.maxTurns}`,
+          `context:   ${formatContextLine(runtime.getContextEstimate())}`,
         ].join("\n"),
+      );
+      return false;
+    case "context":
+      console.log(
+        formatContextBreakdown(
+          runtime.getContextEstimate(),
+          ctx.session.getMessages(),
+        ),
       );
       return false;
     case "memory": {

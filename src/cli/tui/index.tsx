@@ -1,5 +1,5 @@
-import React from "react";
-import { render } from "ink";
+import { createCliRenderer } from "@opentui/core";
+import { createRoot } from "@opentui/react";
 import type { Config } from "../../config/index.js";
 import type { LlmClient } from "../../llm/client.js";
 import type { Session } from "../../session/session.js";
@@ -13,15 +13,43 @@ export interface TuiContext {
   session: Session;
 }
 
-/** Interactive Ink TUI — transcript + spinner + composer + diffs. */
+/**
+ * Interactive TUI on OpenTUI (same toolkit OpenCode uses):
+ * sticky ScrollBox transcript + composer chrome.
+ */
 export async function runTui(ctx: TuiContext): Promise<void> {
-  const instance = render(
-    <TuiApp
-      config={ctx.config}
-      llm={ctx.llm}
-      tools={ctx.tools}
-      session={ctx.session}
-    />,
-  );
-  await instance.waitUntilExit();
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: true,
+    targetFps: 30,
+  });
+
+  const root = createRoot(renderer);
+
+  await new Promise<void>((resolve) => {
+    const finish = () => {
+      try {
+        root.unmount();
+      } catch {
+        // ignore
+      }
+      try {
+        renderer.destroy();
+      } catch {
+        // ignore
+      }
+      resolve();
+    };
+
+    renderer.once("destroy", () => resolve());
+
+    root.render(
+      <TuiApp
+        config={ctx.config}
+        llm={ctx.llm}
+        tools={ctx.tools}
+        session={ctx.session}
+        onExit={finish}
+      />,
+    );
+  });
 }

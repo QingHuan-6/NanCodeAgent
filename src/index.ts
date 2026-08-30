@@ -14,6 +14,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { runAgentLoop } from "./agent/index.js";
 import { createDefaultTransformContext } from "./agent/context.js";
+import { ensureOpenTuiRuntime } from "./cli/ensure-opentui-runtime.js";
 import { createPrinter } from "./cli/printer.js";
 import { runRepl } from "./cli/repl.js";
 import { runSetupWizard } from "./cli/setup.js";
@@ -38,6 +39,7 @@ Usage:
   nan-agent --setup         Configure API key / provider
   nan-agent --help          Show this help
 
+TUI (OpenTUI): Node.js >= 26.4 (auto --experimental-ffi) or Bun
 Config: %USERPROFILE%\\.nan-agent\\.env  (created on first setup)
 Workspace: current directory
 `);
@@ -101,6 +103,8 @@ async function main(): Promise<void> {
     if (plain) {
       await runRepl({ config, llm, tools, session });
     } else {
+      // OpenTUI: Node >= 26.4 needs --experimental-ffi (auto re-exec).
+      ensureOpenTuiRuntime();
       await runTui({ config, llm, tools, session });
     }
     return;

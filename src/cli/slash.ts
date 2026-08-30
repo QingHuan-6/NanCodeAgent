@@ -7,6 +7,7 @@ export type SlashAction =
   | { type: "help" }
   | { type: "clear" }
   | { type: "status" }
+  | { type: "context" }
   | { type: "setup" }
   | { type: "continue" }
   | { type: "compact"; instructions?: string }
@@ -38,6 +39,9 @@ export function parseSlashCommand(line: string): SlashAction | null {
       return { type: "clear" };
     case "status":
       return { type: "status" };
+    case "context":
+    case "ctx":
+      return { type: "context" };
     case "setup":
     case "config":
       return { type: "setup" };
@@ -71,7 +75,8 @@ export function helpText(): string {
   return [
     "Commands:",
     "  /help       Show this help",
-    "  /status     Session / model / workspace / mode",
+    "  /status     Session / model / workspace / mode / ctx%",
+    "  /context    Context window estimate (usage anchor + rough)",
     "  /memory     Memory panel · /memory on|off|toggle [user|project]",
     "  /plan       Read-only plan mode (read/glob/grep/todo/ask/web/lsp/skill/task/memory)",
     "  /agent      Full agent mode (write/edit/bash + ask/web/lsp/skill/task/memory)",
@@ -80,10 +85,11 @@ export function helpText(): string {
     "  /compact    Summarize older context (optional: /compact focus on auth)",
     "  /continue   Resume loop from last user/tool message",
     "  /sessions   List saved session ids",
-    "  /resume id  Load a saved session",
+    "  /resume id  Load a saved session (rebuilds TUI timeline)",
     "  /exit       Quit",
     "",
-    "While busy (TUI): Enter steers · Esc aborts · Ctrl+O folds tools",
+    "While busy (TUI): Enter steers · Esc aborts · Ctrl+O tool detail · mouse/wheel scroll",
+    "OpenTUI sticky transcript (same toolkit as OpenCode) · Ctrl+P/N tool focus",
     "",
     "Anything else is sent as a prompt (or steer when busy).",
   ].join("\n");

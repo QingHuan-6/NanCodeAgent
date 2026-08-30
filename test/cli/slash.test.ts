@@ -16,6 +16,8 @@ describe("slash commands", () => {
     expect(parseSlashCommand("/help")).toEqual({ type: "help" });
     expect(parseSlashCommand("/clear")).toEqual({ type: "clear" });
     expect(parseSlashCommand("/status")).toEqual({ type: "status" });
+    expect(parseSlashCommand("/context")).toEqual({ type: "context" });
+    expect(parseSlashCommand("/ctx")).toEqual({ type: "context" });
     expect(parseSlashCommand("/setup")).toEqual({ type: "setup" });
     expect(parseSlashCommand("/config")).toEqual({ type: "setup" });
     expect(parseSlashCommand("/continue")).toEqual({ type: "continue" });
@@ -57,6 +59,7 @@ describe("slash commands", () => {
     expect(text).toContain("/clear");
     expect(text).toContain("/continue");
     expect(text).toContain("/compact");
+    expect(text).toContain("/context");
     expect(text).toContain("/plan");
     expect(text).toContain("/memory");
     expect(text).toContain("steer");

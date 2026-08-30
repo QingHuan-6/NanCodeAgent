@@ -1,15 +1,17 @@
-/** Shared colors for Ink TUI (ANSI via Ink's color props). */
+/** Shared colors for OpenTUI (hex / named ColorInput). */
 
 export const theme = {
-  brand: "cyan",
-  user: "blueBright",
-  assistant: "white",
-  tool: "yellow",
-  error: "red",
-  success: "green",
-  dim: "gray",
-  border: "cyan",
-  add: "green",
-  remove: "red",
-  header: "cyan",
+  brand: "#22d3ee",
+  user: "#60a5fa",
+  assistant: "#e5e7eb",
+  tool: "#fbbf24",
+  error: "#f87171",
+  success: "#4ade80",
+  dim: "#9ca3af",
+  border: "#22d3ee",
+  add: "#4ade80",
+  remove: "#f87171",
+  header: "#22d3ee",
+  panel: "#111827",
+  bg: "#0b1220",
 } as const;

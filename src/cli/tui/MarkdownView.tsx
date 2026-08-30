@@ -1,10 +1,9 @@
-import React from "react";
-import { Box, Text } from "ink";
+import type { ReactNode } from "react";
 import { parseMarkdown, type InlineSpan, type MdBlock } from "./markdown.js";
 import { theme } from "./theme.js";
 
 /**
- * Render a markdown subset as Ink nodes (markers concealed).
+ * Lightweight markdown → OpenTUI nodes (no tree-sitter dependency).
  */
 export function MarkdownView({
   source,
@@ -12,14 +11,14 @@ export function MarkdownView({
 }: {
   source: string;
   color?: string;
-}): React.ReactElement {
+}): ReactNode {
   const blocks = parseMarkdown(source);
   return (
-    <Box flexDirection="column">
+    <box flexDirection="column">
       {blocks.map((block, idx) => (
         <BlockView key={idx} block={block} color={color} />
       ))}
-    </Box>
+    </box>
   );
 }
 
@@ -29,94 +28,85 @@ function BlockView({
 }: {
   block: MdBlock;
   color: string;
-}): React.ReactElement | null {
+}): ReactNode {
   switch (block.kind) {
     case "blank":
-      return <Text> </Text>;
+      return <text> </text>;
     case "heading":
       return (
-        <Text bold color={theme.header}>
-          {renderSpans(block.spans, color)}
-        </Text>
+        <text>
+          <strong fg={theme.header}>{renderSpans(block.spans, color)}</strong>
+        </text>
       );
     case "list_item": {
-      const bullet = block.ordered
-        ? `${block.index ?? 1}. `
-        : "• ";
+      const bullet = block.ordered ? `${block.index ?? 1}. ` : "• ";
       return (
-        <Text color={color}>
+        <text fg={color}>
           {bullet}
           {renderSpans(block.spans, color)}
-        </Text>
+        </text>
       );
     }
     case "code":
       return (
-        <Box flexDirection="column" marginLeft={1}>
+        <box flexDirection="column" marginLeft={1}>
           {block.lang ? (
-            <Text dimColor>
-              {"```"}
-              {block.lang}
-            </Text>
+            <text fg={theme.dim}>{`\`\`\`${block.lang}`}</text>
           ) : null}
           {block.text.split("\n").map((line, i) => (
-            <Text key={i} color={theme.tool}>
+            <text key={i} fg={theme.tool}>
               {line || " "}
-            </Text>
+            </text>
           ))}
-          {block.lang ? <Text dimColor>{"```"}</Text> : null}
-        </Box>
+          {block.lang ? <text fg={theme.dim}>{"```"}</text> : null}
+        </box>
       );
     case "paragraph":
-      return <Text color={color}>{renderSpans(block.spans, color)}</Text>;
+      return <text fg={color}>{renderSpans(block.spans, color)}</text>;
     default:
       return null;
   }
 }
 
-function renderSpans(
-  spans: InlineSpan[],
-  color: string,
-): React.ReactNode {
+function renderSpans(spans: InlineSpan[], color: string): ReactNode {
   return spans.map((span, i) => {
     switch (span.kind) {
       case "text":
         return (
-          <Text key={i} color={color}>
+          <span key={i} fg={color}>
             {span.text}
-          </Text>
+          </span>
         );
       case "code":
         return (
-          <Text key={i} color={theme.tool}>
+          <span key={i} fg={theme.tool}>
             {span.text}
-          </Text>
+          </span>
         );
       case "bold":
         return (
-          <Text key={i} bold color={color}>
+          <strong key={i} fg={color}>
             {span.text}
-          </Text>
+          </strong>
         );
       case "italic":
         return (
-          <Text key={i} italic color={color}>
+          <em key={i} fg={color}>
             {span.text}
-          </Text>
+          </em>
         );
       case "link": {
         const same =
-          span.text === span.href ||
-          /^https?:\/\//i.test(span.text);
+          span.text === span.href || /^https?:\/\//i.test(span.text);
         return same ? (
-          <Text key={i} color={theme.user}>
+          <span key={i} fg={theme.user}>
             {span.href}
-          </Text>
+          </span>
         ) : (
-          <Text key={i} color={theme.user}>
+          <span key={i} fg={theme.user}>
             {span.text}
-            <Text dimColor> ({span.href})</Text>
-          </Text>
+            <span fg={theme.dim}>{` (${span.href})`}</span>
+          </span>
         );
       }
       default:

@@ -3,7 +3,9 @@
  * Loop stays UI-agnostic; TUI and printers subscribe to this stream.
  */
 
+import type { Usage } from "../llm/types.js";
 import type { TodoItem } from "../session/todo.js";
+import type { ContextEstimate } from "./tokens.js";
 
 export type DiffLineKind = "add" | "remove" | "context" | "header";
 
@@ -61,6 +63,11 @@ export type AgentEvent =
       toolName: string;
       decision: "allow" | "deny" | "ask";
       reason?: string;
+    }
+  | {
+      type: "context_usage";
+      usage: Usage;
+      estimate: ContextEstimate;
     }
   | { type: "error"; message: string };
 

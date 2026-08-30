@@ -20,11 +20,16 @@ import {
 } from "./compact.js";
 import {
   createDefaultTransformContext,
-  estimateMessagesChars,
 } from "./context.js";
 import { continueAgentLoop, runAgentLoop } from "./loop.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { PendingMessageQueue, type QueueMode } from "./queue.js";
+import {
+  buildContextEstimate,
+  resolveContextWindowConfig,
+  type ContextEstimate,
+  type ContextWindowConfig,
+} from "./tokens.js";
 import type {
   AgentLoopOptions,
   AgentLoopResult,
@@ -44,13 +49,20 @@ export interface AgentRuntimeOptions {
   steeringMode?: QueueMode;
   followUpMode?: QueueMode;
   mode?: AgentToolMode;
-  /** Context prune char budget (default 120_000). */
+  /**
+   * Soft prune / microcompact char budget for transformContext (default 120_000).
+   * Auto LLM-compact uses token estimates (see contextWindowTokens).
+   */
   contextMaxChars?: number;
   /**
-   * Auto LLM-compact when non-system chars exceed this fraction of contextMaxChars
-   * (default 0.85). Set 0 to disable.
+   * Auto LLM-compact when estimated tokens exceed this fraction of
+   * (windowTokens − outputReserve) (default 0.85). Set 0 to disable.
    */
   autoCompactRatio?: number;
+  /** Model context window in tokens (default NAN_CONTEXT_TOKENS or 128_000). */
+  contextWindowTokens?: number;
+  /** Completion reserve in tokens (default NAN_CONTEXT_RESERVE or 8_192). */
+  outputReserveTokens?: number;
 }
 
 export class AgentRuntime {
@@ -71,6 +83,7 @@ export class AgentRuntime {
   private skipInitialSteeringPoll = false;
   private readonly contextMaxChars: number;
   private readonly autoCompactRatio: number;
+  private readonly contextWindow: ContextWindowConfig;
   /** One auto-compact per prompt/continue lifecycle. */
   private autoCompactUsed = false;
   private overflowCompactUsed = false;
@@ -93,6 +106,12 @@ export class AgentRuntime {
     );
     this.contextMaxChars = options.contextMaxChars ?? 120_000;
     this.autoCompactRatio = options.autoCompactRatio ?? 0.85;
+    const defaults = resolveContextWindowConfig();
+    this.contextWindow = {
+      windowTokens: options.contextWindowTokens ?? defaults.windowTokens,
+      outputReserveTokens:
+        options.outputReserveTokens ?? defaults.outputReserveTokens,
+    };
   }
 
   get isRunning(): boolean {
@@ -101,6 +120,16 @@ export class AgentRuntime {
 
   get signal(): AbortSignal | undefined {
     return this.activeAbort?.signal;
+  }
+
+  /** Claude-style usage-anchor + rough token estimate for the next prompt. */
+  getContextEstimate(): ContextEstimate {
+    return buildContextEstimate(
+      this.session.getMessages(),
+      this.session.getLastUsage(),
+      this.session.getUsageAssistantIndex(),
+      this.contextWindow,
+    );
   }
 
   set steeringMode(mode: QueueMode) {
@@ -267,15 +296,14 @@ export class AgentRuntime {
       askUser: this.askUser,
       signal,
       transformContext: async (messages, sig) => {
-        const rest = messages.filter((m) => m.role !== "system");
-        const chars = estimateMessagesChars(rest);
+        const est = this.getContextEstimate();
         const threshold = Math.floor(
-          this.contextMaxChars * this.autoCompactRatio,
+          est.promptBudgetTokens * this.autoCompactRatio,
         );
         if (
           this.autoCompactRatio > 0 &&
           !this.autoCompactUsed &&
-          chars > threshold
+          est.estimatedTokens > threshold
         ) {
           this.autoCompactUsed = true;
           await this.compact({

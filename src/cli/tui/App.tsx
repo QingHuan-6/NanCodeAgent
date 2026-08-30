@@ -1,8 +1,18 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
-import Spinner from "ink-spinner";
-import { AgentRuntime } from "../../agent/index.js";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import {
+  AgentRuntime,
+  formatContextBreakdown,
+  formatContextLine,
+} from "../../agent/index.js";
 import type { AgentEvent } from "../../agent/events.js";
+import type { ContextEstimate } from "../../agent/tokens.js";
 import type { Config } from "../../config/index.js";
 import type { LlmClient } from "../../llm/client.js";
 import { Session } from "../../session/session.js";
@@ -21,6 +31,8 @@ import {
 import { theme } from "./theme.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { ToolCard } from "./ToolCard.js";
+import { ToolDetailPanel } from "./ToolDetail.js";
+import { timelineFromMessages } from "./resume-timeline.js";
 import {
   nextId,
   toolSubject,
@@ -30,20 +42,23 @@ import {
   type UserQuestionRequest,
 } from "./types.js";
 
+const STREAM_FLUSH_MS = 48;
+
 export interface TuiAppProps {
   config: Config;
   llm: LlmClient;
   tools: ToolRegistry;
   session: Session;
+  onExit: () => void;
 }
 
 /**
- * Chronological transcript TUI (OpenCode / Pi event order):
- *   user → assistant → tools (live update) → assistant → … → done
- * Footer stays: composer + status. No separate "tools dump" below history.
+ * OpenTUI transcript (same toolkit as OpenCode):
+ * sticky ScrollBox + fixed composer / tool-detail chrome.
  */
-export function TuiApp(props: TuiAppProps): React.ReactElement {
-  const { exit } = useApp();
+export function TuiApp(props: TuiAppProps): ReactNode {
+  const { onExit } = props;
+  const { width, height } = useTerminalDimensions();
   const [config] = useState(props.config);
   const [llm] = useState(props.llm);
   const toolsReg = props.tools;
@@ -58,10 +73,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     {
       id: nextId("sys"),
       kind: "system",
-      text: "prompt · steer while busy · Esc abort · ctrl+o expand tool · /help",
+      text: "OpenTUI · scroll wheel / sticky · ctrl+o tool · ctrl+p/n · /help",
     },
   ]);
   const [focusedToolId, setFocusedToolId] = useState<string | null>(null);
+  const [toolDetailOpen, setToolDetailOpen] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState("");
   const [status, setStatus] = useState<StatusState>({ phase: "idle" });
   const [input, setInput] = useState("");
@@ -71,9 +87,29 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     null,
   );
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [ctxEstimate, setCtxEstimate] = useState<ContextEstimate | null>(null);
 
   const streamBufRef = useRef("");
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const runtimeRef = useRef<AgentRuntime | null>(null);
+
+  const flushStreamBuffer = useCallback(() => {
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    setStreamBuffer(streamBufRef.current);
+  }, []);
+
+  const scheduleStreamFlush = useCallback(() => {
+    if (streamFlushTimerRef.current) return;
+    streamFlushTimerRef.current = setTimeout(() => {
+      streamFlushTimerRef.current = null;
+      setStreamBuffer(streamBufRef.current);
+    }, STREAM_FLUSH_MS);
+  }, []);
 
   const pushItem = useCallback((item: TimelineItem) => {
     setTimeline((prev) => [...prev, item]);
@@ -95,15 +131,20 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           setStatus({ phase: "thinking", detail: `turn ${event.turn}` });
           break;
         case "message_start":
+          if (streamFlushTimerRef.current) {
+            clearTimeout(streamFlushTimerRef.current);
+            streamFlushTimerRef.current = null;
+          }
           streamBufRef.current = "";
           setStreamBuffer("");
           setStatus({ phase: "streaming", detail: "assistant" });
           break;
         case "message_delta":
           streamBufRef.current += event.text;
-          setStreamBuffer(streamBufRef.current);
+          scheduleStreamFlush();
           break;
         case "assistant_message": {
+          flushStreamBuffer();
           const finalText = (
             streamBufRef.current ||
             event.content ||
@@ -111,7 +152,6 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           ).trimEnd();
           streamBufRef.current = "";
           setStreamBuffer("");
-          // Only show real assistant prose in the timeline (no "(calling N tools)").
           if (finalText) {
             pushItem({
               id: nextId("asst"),
@@ -180,6 +220,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             return copy;
           });
           break;
+        case "context_usage":
+          setCtxEstimate(event.estimate);
+          break;
         case "error":
           pushItem({
             id: nextId("err"),
@@ -188,6 +231,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           });
           break;
         case "agent_end":
+          flushStreamBuffer();
           setStatus({ phase: "idle" });
           streamBufRef.current = "";
           setStreamBuffer("");
@@ -202,7 +246,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           break;
       }
     },
-    [pushItem],
+    [pushItem, scheduleStreamFlush, flushStreamBuffer],
   );
 
   const askPermission = useCallback(
@@ -327,27 +371,41 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
   }, [getRuntime, pushItem]);
 
-  const toolIds = useMemo(
-    () => timeline.filter((i) => i.kind === "tool").map((i) => i.id),
+  const tools = useMemo(
+    () =>
+      timeline.filter(
+        (i): i is Extract<TimelineItem, { kind: "tool" }> => i.kind === "tool",
+      ),
     [timeline],
   );
 
-  const toggleFocusedTool = useCallback(() => {
-    setTimeline((prev) => {
-      const tools = prev.filter((i) => i.kind === "tool");
-      if (tools.length === 0) return prev;
-      const targetId =
-        focusedToolId && tools.some((t) => t.id === focusedToolId)
-          ? focusedToolId
-          : tools[tools.length - 1]!.id;
-      return prev.map((item) => {
-        if (item.kind !== "tool" || item.id !== targetId) return item;
-        if (item.status === "running") return item;
-        if (!item.output && !item.diff) return item;
-        return { ...item, expanded: !item.expanded };
-      });
-    });
-  }, [focusedToolId]);
+  const toolIds = useMemo(() => tools.map((t) => t.id), [tools]);
+
+  const focusedTool = useMemo(() => {
+    if (focusedToolId) {
+      const hit = tools.find((t) => t.id === focusedToolId);
+      if (hit) return hit;
+    }
+    return tools.length > 0 ? tools[tools.length - 1]! : null;
+  }, [tools, focusedToolId]);
+
+  const focusedToolIndex = useMemo(() => {
+    if (!focusedTool) return -1;
+    return tools.findIndex((t) => t.id === focusedTool.id);
+  }, [tools, focusedTool]);
+
+  const toggleToolDetail = useCallback(() => {
+    if (tools.length === 0) return;
+    const target =
+      focusedToolId && tools.some((t) => t.id === focusedToolId)
+        ? focusedToolId
+        : tools[tools.length - 1]!.id;
+    const tool = tools.find((t) => t.id === target);
+    if (!tool || tool.status === "running") return;
+    if (!tool.output && !tool.diff) return;
+    setFocusedToolId(target);
+    setToolDetailOpen((open) => !open);
+  }, [tools, focusedToolId]);
 
   const moveToolFocus = useCallback(
     (delta: number) => {
@@ -368,7 +426,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
 
       switch (slash.type) {
         case "exit":
-          exit();
+          onExit();
           return true;
         case "help":
           pushItem({ id: nextId("sys"), kind: "system", text: helpText() });
@@ -378,6 +436,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           clearTodos(session.id);
           setTodos([]);
           setFocusedToolId(null);
+          setToolDetailOpen(false);
+          setCtxEstimate(null);
           setTimeline([
             {
               id: nextId("sys"),
@@ -386,7 +446,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             },
           ]);
           return true;
-        case "status":
+        case "status": {
+          const est = runtime.getContextEstimate();
+          setCtxEstimate(est);
           pushItem({
             id: nextId("sys"),
             kind: "system",
@@ -398,9 +460,21 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               `model:     ${config.model}`,
               `workspace: ${config.workspace}`,
               `running:   ${runtime.isRunning}`,
+              `context:   ${formatContextLine(est)}`,
             ].join("\n"),
           });
           return true;
+        }
+        case "context": {
+          const est = runtime.getContextEstimate();
+          setCtxEstimate(est);
+          pushItem({
+            id: nextId("sys"),
+            kind: "system",
+            text: formatContextBreakdown(est, session.getMessages()),
+          });
+          return true;
+        }
         case "memory": {
           const parsed = parseMemorySlashArg(slash.arg ?? "");
           if (parsed.kind === "error") {
@@ -423,11 +497,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               });
             }
           }
-          pushItem({
-            id: nextId("sys"),
-            kind: "system",
-            text,
-          });
+          pushItem({ id: nextId("sys"), kind: "system", text });
           return true;
         }
         case "plan":
@@ -535,13 +605,25 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             const restored =
               loadPersistedTodos(config.workspace, loaded.id) ?? [];
             setTodos(restored);
-            pushItem({
-              id: nextId("sys"),
-              kind: "system",
-              text: `Loaded ${loaded.id} (${loaded.messageCount()} msgs)${
-                restored.length ? ` · ${summarizeTodos(restored)}` : ""
-              }. /continue to resume.`,
-            });
+            const rebuilt = timelineFromMessages(loaded.getMessages());
+            setTimeline([
+              {
+                id: nextId("sys"),
+                kind: "system",
+                text: `NanCodeAgent · ${config.model} · ${config.workspace}`,
+              },
+              ...rebuilt,
+              {
+                id: nextId("sys"),
+                kind: "system",
+                text: `Loaded ${loaded.id} (${loaded.messageCount()} msgs)${
+                  restored.length ? ` · ${summarizeTodos(restored)}` : ""
+                }. /continue to resume.`,
+              },
+            ]);
+            setFocusedToolId(null);
+            setToolDetailOpen(false);
+            setCtxEstimate(null);
           } catch (err) {
             pushItem({
               id: nextId("err"),
@@ -562,7 +644,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           return true;
       }
     },
-    [exit, pushItem, session, config, getRuntime, runContinue],
+    [
+      onExit,
+      pushItem,
+      session,
+      config,
+      getRuntime,
+      runContinue,
+      todos.length,
+    ],
   );
 
   const submit = useCallback(
@@ -579,14 +669,18 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     [permission, userQuestion, handleSlash, runPrompt],
   );
 
-  useInput((ch, key) => {
+  useKeyboard((key) => {
+    if (key.eventType === "release") return;
+
     if (permission) {
-      if (ch === "y" || ch === "Y") {
+      if (key.name === "y") {
         permission.resolve(true);
+        key.preventDefault();
         return;
       }
-      if (ch === "n" || ch === "N" || key.return || key.escape) {
+      if (key.name === "n" || key.name === "escape" || key.name === "return") {
         permission.resolve(false);
+        key.preventDefault();
         return;
       }
       return;
@@ -594,73 +688,47 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
 
     if (userQuestion) {
       const opts = userQuestion.options;
-      if (opts && opts.length > 0 && ch && /^[1-8]$/.test(ch) && !input) {
-        const idx = Number(ch) - 1;
+      if (opts && opts.length > 0 && /^[1-8]$/.test(key.name) && !input) {
+        const idx = Number(key.name) - 1;
         if (idx >= 0 && idx < opts.length) {
           userQuestion.resolve(opts[idx]!);
+          key.preventDefault();
           return;
         }
       }
-      if (key.return) {
-        const answer = input.trim();
-        if (answer) {
-          userQuestion.resolve(answer);
-        }
-        return;
-      }
-      if (key.escape) {
+      if (key.name === "escape") {
         userQuestion.resolve("(user dismissed the question)");
+        key.preventDefault();
         return;
-      }
-      if (key.ctrl && ch === "j") {
-        setInput((v) => `${v}\n`);
-        return;
-      }
-      if (key.backspace || key.delete) {
-        setInput((v) => v.slice(0, -1));
-        return;
-      }
-      if (ch && !key.ctrl && !key.meta) {
-        setInput((v) => v + ch);
       }
       return;
     }
 
-    if (key.ctrl && ch === "o") {
-      toggleFocusedTool();
+    if (key.ctrl && key.name === "o") {
+      toggleToolDetail();
+      key.preventDefault();
       return;
     }
-    if (key.ctrl && ch === "p") {
+    if (key.ctrl && key.name === "p") {
       moveToolFocus(-1);
+      key.preventDefault();
       return;
     }
-    if (key.ctrl && ch === "n") {
+    if (key.ctrl && key.name === "n") {
       moveToolFocus(1);
+      key.preventDefault();
       return;
     }
 
-    if (key.escape && busy) {
+    if (key.name === "escape" && toolDetailOpen) {
+      setToolDetailOpen(false);
+      key.preventDefault();
+      return;
+    }
+
+    if (key.name === "escape" && busy) {
       getRuntime().abort();
-      return;
-    }
-
-    if (key.return) {
-      void submit(input);
-      return;
-    }
-
-    if (key.ctrl && ch === "j") {
-      setInput((v) => `${v}\n`);
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
-      return;
-    }
-
-    if (ch && !key.ctrl && !key.meta) {
-      setInput((v) => v + ch);
+      key.preventDefault();
     }
   });
 
@@ -681,195 +749,235 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
   }, [status, busy]);
 
+  const ctxFooter = useMemo(() => {
+    if (!ctxEstimate) return "ctx —";
+    const pct = Math.round(ctxEstimate.usedRatio * 100);
+    return `ctx ~${pct}%`;
+  }, [ctxEstimate]);
+
+  const composerFocused = !permission;
+  const chromeHint = permission
+    ? "[y] allow · [n] deny"
+    : userQuestion
+      ? "Enter submit · Esc skip"
+      : "ctrl+o tool · ctrl+p/n · scroll sticky";
+
   return (
-    <Box flexDirection="column" width="100%">
-      <Box flexDirection="column">
+    <box
+      width={width}
+      height={height}
+      flexDirection="column"
+      backgroundColor={theme.bg}
+    >
+      <scrollbox
+        stickyScroll
+        stickyStart="bottom"
+        scrollY
+        viewportCulling
+        flexGrow={1}
+        width="100%"
+        focused={false}
+        style={{
+          rootOptions: { backgroundColor: theme.bg },
+          viewportOptions: { backgroundColor: theme.bg },
+          contentOptions: { backgroundColor: theme.bg },
+          scrollbarOptions: {
+            trackOptions: {
+              foregroundColor: theme.brand,
+              backgroundColor: theme.panel,
+            },
+          },
+        }}
+      >
         {timeline.map((item) => (
           <TimelineRow
             key={item.id}
             item={item}
             focusedToolId={focusedToolId}
+            toolDetailOpen={toolDetailOpen}
           />
         ))}
-      </Box>
+        {streamBuffer ? (
+          <box flexDirection="column" marginBottom={1}>
+            <text fg={theme.brand}>Assistant</text>
+            <MarkdownView source={streamBuffer} />
+            <text fg={theme.dim}>▊</text>
+          </box>
+        ) : null}
+      </scrollbox>
 
-      {streamBuffer ? (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color={theme.brand} bold>
-            Assistant
-          </Text>
-          <MarkdownView source={streamBuffer} />
-          <Text dimColor>▊</Text>
-        </Box>
-      ) : null}
+      <box flexDirection="column" flexShrink={0} width="100%">
+        {toolDetailOpen && focusedTool ? (
+          <ToolDetailPanel
+            tool={focusedTool}
+            index={Math.max(0, focusedToolIndex)}
+            total={tools.length}
+          />
+        ) : null}
 
-      <Box marginTop={1} flexDirection="column">
         {todos.length > 0 ? (
-          <Box flexDirection="column" marginBottom={1} marginLeft={1}>
-            <Text dimColor>● {summarizeTodos(todos)}</Text>
+          <box flexDirection="column" marginBottom={1} marginLeft={1}>
+            <text fg={theme.dim}>{`● ${summarizeTodos(todos)}`}</text>
             {todos.slice(0, 8).map((t) => (
-              <Text
+              <text
                 key={t.id}
-                dimColor={t.status === "completed" || t.status === "cancelled"}
-                color={
+                fg={
                   t.status === "in_progress"
                     ? theme.tool
                     : t.status === "completed"
                       ? theme.success
-                      : undefined
+                      : theme.dim
                 }
               >
-                {"  "}
-                {t.status === "completed"
-                  ? "✔"
-                  : t.status === "in_progress"
-                    ? "◼"
-                    : t.status === "cancelled"
-                      ? "–"
-                      : "◻"}{" "}
-                {t.content}
-              </Text>
+                {`  ${
+                  t.status === "completed"
+                    ? "✔"
+                    : t.status === "in_progress"
+                      ? "◼"
+                      : t.status === "cancelled"
+                        ? "–"
+                        : "◻"
+                } ${t.content}`}
+              </text>
             ))}
             {todos.length > 8 ? (
-              <Text dimColor>  … +{todos.length - 8} more</Text>
+              <text fg={theme.dim}>{`  … +${todos.length - 8} more`}</text>
             ) : null}
-          </Box>
+          </box>
         ) : null}
+
         {permission ? (
-          <Box
+          <box
+            border
+            borderColor="#eab308"
+            paddingLeft={1}
+            paddingRight={1}
             flexDirection="column"
-            borderStyle="round"
-            borderColor="yellow"
-            paddingX={1}
           >
-            <Text color="yellow">
-              Allow {permission.toolName}? {permission.reason}
-            </Text>
-            <Text dimColor>[y] allow · [n] deny</Text>
-          </Box>
+            <text fg="#eab308">
+              {`Allow ${permission.toolName}? ${permission.reason}`}
+            </text>
+            <text fg={theme.dim}>[y] allow · [n] deny</text>
+          </box>
         ) : userQuestion ? (
-          <Box
-            flexDirection="column"
-            borderStyle="round"
+          <box
+            border
             borderColor={theme.tool}
-            paddingX={1}
-          >
-            <Text color={theme.tool} bold>
-              Question
-            </Text>
-            <Text>{userQuestion.question}</Text>
-            {userQuestion.options?.map((opt, i) => (
-              <Text key={`${i}-${opt}`} dimColor>
-                {"  "}
-                [{i + 1}] {opt}
-              </Text>
-            ))}
-            <Box marginTop={1}>
-              <Text color={theme.brand}>{"> "}</Text>
-              <Text>
-                {input.length > 0 ? input : ""}
-                {input.length === 0 ? (
-                  <Text dimColor>
-                    {userQuestion.options?.length
-                      ? "1–8 or type answer…"
-                      : "type answer…"}
-                  </Text>
-                ) : null}
-              </Text>
-              <Text color={theme.brand}>█</Text>
-            </Box>
-            <Text dimColor>
-              Enter submit
-              {userQuestion.options?.length ? " · digit picks option" : ""}
-              {" · Esc skip"}
-            </Text>
-          </Box>
-        ) : (
-          <Box
+            paddingLeft={1}
+            paddingRight={1}
             flexDirection="column"
-            borderStyle="round"
-            borderColor={theme.border}
-            paddingX={1}
           >
-            <Box>
-              <Text color={theme.brand}>{busy ? "↗ " : "> "}</Text>
-              <Text>
-                {input.length > 0 ? input : ""}
-                {input.length === 0 ? (
-                  <Text dimColor>
-                    {busy ? "steer…" : "message…"}
-                  </Text>
-                ) : null}
-              </Text>
-              <Text color={theme.brand}>█</Text>
-            </Box>
-          </Box>
+            <text fg={theme.tool}>Question</text>
+            <text>{userQuestion.question}</text>
+            {userQuestion.options?.map((opt, i) => (
+              <text key={`${i}-${opt}`} fg={theme.dim}>
+                {`  [${i + 1}] ${opt}`}
+              </text>
+            ))}
+            <input
+              focused={composerFocused}
+              value={input}
+              onInput={setInput}
+              onSubmit={() => {
+                const answer = input.trim();
+                if (answer) userQuestion.resolve(answer);
+              }}
+              placeholder={
+                userQuestion.options?.length
+                  ? "1–8 or type answer…"
+                  : "type answer…"
+              }
+              width="100%"
+            />
+          </box>
+        ) : (
+          <box
+            border
+            borderColor={theme.border}
+            paddingLeft={1}
+            paddingRight={1}
+            flexDirection="column"
+          >
+            <input
+              focused={composerFocused}
+              value={input}
+              onInput={setInput}
+              onSubmit={() => {
+                void submit(input);
+              }}
+              placeholder={busy ? "steer…" : "message…"}
+              width="100%"
+            />
+          </box>
         )}
 
-        <Box>
-          {status.phase !== "idle" && status.phase !== "ask" ? (
-            <Text color={theme.brand}>
-              <Spinner type="dots" /> {statusLabel}
-            </Text>
-          ) : (
-            <Text dimColor>
-              {statusLabel} · ctrl+o fold · ctrl+p/n tool
-            </Text>
-          )}
-        </Box>
-      </Box>
-    </Box>
+        <box
+          width="100%"
+          flexDirection="row"
+          justifyContent="space-between"
+          paddingLeft={1}
+          paddingRight={1}
+        >
+          <text fg={status.phase !== "idle" && status.phase !== "ask" ? theme.brand : theme.dim}>
+            {`${status.phase !== "idle" && status.phase !== "ask" ? "… " : ""}${statusLabel} · ${chromeHint}`}
+          </text>
+          <text fg={theme.dim}>
+            {`${config.model} · ${runtimeRef.current?.mode ?? "agent"} · ${ctxFooter}`}
+          </text>
+        </box>
+      </box>
+    </box>
   );
 }
 
 function TimelineRow({
   item,
   focusedToolId,
+  toolDetailOpen,
 }: {
   item: TimelineItem;
   focusedToolId: string | null;
-}): React.ReactElement {
+  toolDetailOpen: boolean;
+}): ReactNode {
   switch (item.kind) {
     case "user":
       return (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color={theme.user} bold>
-            You
-          </Text>
-          <Text>{item.text}</Text>
-        </Box>
+        <box flexDirection="column" marginBottom={1}>
+          <text fg={theme.user}>You</text>
+          <text>{item.text}</text>
+        </box>
       );
     case "assistant":
       return (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color={theme.brand} bold>
-            Assistant
-          </Text>
+        <box flexDirection="column" marginBottom={1}>
+          <text fg={theme.brand}>Assistant</text>
           <MarkdownView source={item.text} />
-        </Box>
+        </box>
       );
     case "tool":
       return (
-        <ToolCard card={item} focused={item.id === focusedToolId} />
+        <ToolCard
+          card={item}
+          focused={item.id === focusedToolId}
+          detailOpen={toolDetailOpen}
+        />
       );
     case "done":
       return (
-        <Box marginY={1}>
-          <Text color={theme.success}>
-            ── done ({item.reason}, {item.turns} turns) ──
-          </Text>
-        </Box>
+        <box marginTop={1} marginBottom={1}>
+          <text fg={theme.success}>
+            {`── done (${item.reason}, ${item.turns} turns) ──`}
+          </text>
+        </box>
       );
     case "error":
       return (
-        <Text color={theme.error} bold>
-          [error] {item.text}
-        </Text>
+        <text fg={theme.error}>{`[error] ${item.text}`}</text>
       );
     case "system":
-      return <Text dimColor>{item.text}</Text>;
+      return <text fg={theme.dim}>{item.text}</text>;
     default:
-      return <Text />;
+      return <text />;
   }
 }
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ChatMessage } from "../llm/types.js";
+import type { ChatMessage, Usage } from "../llm/types.js";
 
 /**
  * In-memory conversation history with optional JSONL persistence + resume.
@@ -10,6 +10,10 @@ export class Session {
   private messages: ChatMessage[] = [];
   private readonly persistDir: string | null;
   private persistEnabled = true;
+  /** Last API usage (prompt_tokens anchors context estimate). */
+  private lastUsage: Usage | null = null;
+  /** Index of the assistant message that produced lastUsage. */
+  private usageAssistantIndex: number | null = null;
 
   constructor(options?: { id?: string; persistDir?: string }) {
     this.id = options?.id ?? `session-${Date.now()}`;
@@ -22,11 +26,14 @@ export class Session {
 
   setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+    this.clampUsageAnchor();
   }
 
   /** Replace history (e.g. after /compact) and rewrite JSONL when persisting. */
   replaceMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+    // History rewrite invalidates usage indices — next estimate is rough until a new call.
+    this.clearUsage();
     this.rewritePersistFile();
   }
 
@@ -35,9 +42,29 @@ export class Session {
     this.persistLine(message);
   }
 
+  /** Record usage from the LLM call that produced the assistant at assistantIndex. */
+  recordUsage(usage: Usage, assistantIndex: number): void {
+    this.lastUsage = { ...usage };
+    this.usageAssistantIndex = assistantIndex;
+  }
+
+  getLastUsage(): Usage | null {
+    return this.lastUsage;
+  }
+
+  getUsageAssistantIndex(): number | null {
+    return this.usageAssistantIndex;
+  }
+
+  clearUsage(): void {
+    this.lastUsage = null;
+    this.usageAssistantIndex = null;
+  }
+
   /** Drop conversation history (used by /clear). */
   clear(): void {
     this.messages = [];
+    this.clearUsage();
     this.rewritePersistFile();
   }
 
@@ -97,6 +124,15 @@ export class Session {
       }))
       .sort((a, b) => b.mtime - a.mtime)
       .map((x) => x.id);
+  }
+
+  private clampUsageAnchor(): void {
+    if (
+      this.usageAssistantIndex != null &&
+      this.usageAssistantIndex >= this.messages.length
+    ) {
+      this.clearUsage();
+    }
   }
 
   private persistLine(message: ChatMessage): void {

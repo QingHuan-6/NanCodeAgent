@@ -1,41 +1,39 @@
-import React from "react";
-import { Box, Text } from "ink";
+import type { ReactNode } from "react";
 import type { ToolUiDiff } from "../../agent/events.js";
 import { theme } from "./theme.js";
 
-export function DiffBlock({ diff }: { diff: ToolUiDiff }): React.ReactElement {
+export function DiffBlock({ diff }: { diff: ToolUiDiff }): ReactNode {
   return (
-    <Box flexDirection="column" marginLeft={2} marginY={0}>
+    <box flexDirection="column" marginLeft={2}>
       {diff.lines.map((line, i) => {
         const key = `${diff.path}-${i}`;
         switch (line.kind) {
           case "add":
             return (
-              <Text key={key} color={theme.add}>
-                + {line.text}
-              </Text>
+              <text key={key} fg={theme.add}>
+                {`+ ${line.text}`}
+              </text>
             );
           case "remove":
             return (
-              <Text key={key} color={theme.remove}>
-                - {line.text}
-              </Text>
+              <text key={key} fg={theme.remove}>
+                {`- ${line.text}`}
+              </text>
             );
           case "header":
             return (
-              <Text key={key} color={theme.header} dimColor>
+              <text key={key} fg={theme.header}>
                 {line.text}
-              </Text>
+              </text>
             );
           default:
             return (
-              <Text key={key} dimColor>
-                {"  "}
-                {line.text}
-              </Text>
+              <text key={key} fg={theme.dim}>
+                {`  ${line.text}`}
+              </text>
             );
         }
       })}
-    </Box>
+    </box>
   );
 }

@@ -93,6 +93,8 @@ export function createPrinter(
           );
         }
         break;
+      case "context_usage":
+        break;
       case "turn_end":
         break;
       case "agent_end":
