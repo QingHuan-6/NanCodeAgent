@@ -25,6 +25,7 @@ import {
 } from "./config/index.js";
 import { LlmClient } from "./llm/index.js";
 import { Session } from "./session/session.js";
+import { syncConfiguredSkillSources } from "./skills/discover.js";
 import { createDefaultRegistry } from "./tools/index.js";
 
 function printHelp(): void {
@@ -104,6 +105,8 @@ async function main(): Promise<void> {
     }
     return;
   }
+
+  await syncConfiguredSkillSources(config.workspace);
 
   await runAgentLoop(oneShot, {
     llm,

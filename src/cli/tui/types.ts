@@ -84,6 +84,10 @@ export function toolSubject(
         }`,
         70,
       );
+    case "skill":
+      return clip(String(args.name ?? "skill"), 70);
+    case "skill_install":
+      return clip(String(args.source ?? ""), 70);
     default:
       return clip(JSON.stringify(args), 70);
   }
@@ -114,6 +118,10 @@ export function toolRunningLabel(toolName: string, subject: string): string {
       return `Searching web for ${subject}`;
     case "lsp":
       return `LSP ${subject}`;
+    case "skill":
+      return `Loading skill ${subject}`;
+    case "skill_install":
+      return `Installing skills from ${subject}`;
     default:
       return `Running ${toolName} ${subject}`.trim();
   }
@@ -159,6 +167,10 @@ export function toolDoneLabel(
       return `Searched web for ${subject}`;
     case "lsp":
       return `LSP ${subject}`;
+    case "skill":
+      return `Loaded skill ${subject}`;
+    case "skill_install":
+      return `Installed skills from ${subject}`;
     default:
       return `Finished ${toolName}${subject ? ` ${subject}` : ""}`;
   }

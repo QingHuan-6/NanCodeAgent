@@ -6,7 +6,7 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + LLM /compact + tool-output spill + session resume.
+Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + **skills** + LLM /compact + tool-output spill + session resume.
 
 ## Setup
 
@@ -53,6 +53,14 @@ Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
 **Modes:** `/plan` = read-only (read/glob/grep + todo/ask/web/lsp). `/agent` = full tools (write/edit/bash + the same).  
 Multi-step work: the model can call `todo_write` to keep a live checklist (shown above the prompt).  
 Clarifying questions: `ask_user` (TUI options / free text). Public docs: `web_search` + `web_fetch` (SSRF-blocked). Code intel: `lsp` (TS/JS via typescript-language-server, Python via pyright — first call may `npx` download).  
+**Skills (any folder):** built-in skills ship in `bundled-skills/` (`commit-message`, `skill-creator`). Also scans Claude/OpenCode-compatible dirs and walks up to the git root.  
+**Remote catalogs (OpenCode-style):** put URLs/dirs in `.nan/skills.json` or `~/.nan-agent/skills.json`:
+
+```json
+{ "skills": ["https://example.com/opencode/skills/", "~/shared-skills"] }
+```
+
+HTTP bases must serve `index.json` (`name` / `version` / `files`); Nan caches under `~/.nan-agent/skills-cache/` and refreshes when `version` changes. Or ask the agent: `用 skill_install 安装 https://…/skills/`（可用 `global: true`）. Env: `NAN_SKILL_SOURCES`.  
 Large tool output is saved under `.nan/tool-output/` with a short summary returned to the model.
 
 ### Use from any folder (global)
@@ -90,7 +98,9 @@ src/
   index.ts          CLI entry (setup / TUI / plain / one-shot)
   config/           runtime config + ~/.nan-agent .env
   llm/              OpenAI-compatible client (+ SSE stream)
-  tools/            read/write/edit/bash/glob/grep/todo/ask/web/lsp (+ spill)
+  tools/            read/write/edit/bash/glob/grep/todo/ask/web/lsp/skill (+ spill)
+  skills/           SKILL.md discovery + catalog helpers
+  bundled-skills/   built-in skills shipped with the npm package
   agent/            loop, runtime, prompt, events
   session/          message history + resume + todos
   lsp/              minimal stdio LSP client
@@ -99,7 +109,7 @@ src/
 test/               Vitest suite
 ```
 
-Not in scope for this harness (product-scale): MCP, notebooks, skills, sub-agents.
+Not in scope for this harness (product-scale): MCP, notebooks, sub-agents.
 ## Secrets
 
 API keys live in environment, project `.env`, or `~/.nan-agent/.env` — never in the git repo.

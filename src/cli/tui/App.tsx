@@ -402,7 +402,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             pushItem({
               id: nextId("sys"),
               kind: "system",
-              text: "Plan mode on — read/glob/grep/todo/ask/web/lsp (no writes).",
+              text: "Plan mode on — read/glob/grep/todo/ask/web/lsp/skill (no writes).",
             });
           } catch (err) {
             pushItem({

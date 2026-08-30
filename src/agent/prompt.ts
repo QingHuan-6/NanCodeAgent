@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { formatSkillsPromptSection } from "../skills/index.js";
 
 const MAX_INSTRUCTION_CHARS = 8_000;
 
@@ -29,6 +30,11 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     sections.push(`# Project instructions\n\n${projectInstructions}`);
   }
 
+  const skills = formatSkillsPromptSection({ workspace });
+  if (skills) {
+    sections.push(skills);
+  }
+
   if (options.extraInstructions?.trim()) {
     sections.push(`# Additional instructions\n\n${options.extraInstructions.trim()}`);
   }
@@ -45,6 +51,7 @@ function buildRoleSection(mode: "agent" | "plan"): string {
       "You are NanCodeAgent in **plan mode** (read-only).",
       "Explore with read_file / glob / grep; use todo_write for multi-step plans.",
       "Use ask_user when requirements are ambiguous; web_search/web_fetch for public docs; lsp for symbols/defs.",
+      "If an Available skill matches the task, call `skill` to load its instructions before planning.",
       "Do NOT modify files or run shell commands — those tools are unavailable.",
       "Produce a clear implementation plan: goals, files to touch, steps, risks.",
       "When the plan is ready, tell the user to switch to agent mode (/agent) to execute.",
@@ -57,6 +64,7 @@ function buildRoleSection(mode: "agent" | "plan"): string {
     "Complete programming tasks by calling tools to inspect and modify the workspace.",
     "Prefer small, correct edits. Prefer reading before writing. Verify with shell commands when useful.",
     "Use glob/grep to find files instead of guessing paths.",
+    "If an Available skill matches the task, call `skill` to load full instructions before improvising.",
     "Use ask_user for clarifying product/API choices you cannot discover from the repo.",
     "Use web_search / web_fetch for public documentation (not private/local URLs).",
     "Use lsp for go-to-definition, references, hover, and symbols when available.",
@@ -89,9 +97,11 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     return [
       "# Tool policy (plan mode)",
       "",
-      "- Allowed: read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp.",
+      "- Allowed: read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp, skill, skill_install.",
       "- Forbidden: write_file, edit_file, bash, and any workspace mutation.",
       "- For multi-step plans, use todo_write to list concrete steps before finishing.",
+      "- When a listed skill matches, call skill before drafting the plan.",
+      "- To add a remote OpenCode-style catalog, use skill_install with an https base URL (index.json).",
       "- Stay inside the workspace for file tools; web_* are for public internet only.",
       "- End with a concrete plan the user can approve before switching to /agent.",
     ].join("\n");
@@ -105,6 +115,8 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     "- Prefer ask_user over guessing when a requirement has multiple valid product choices.",
     "- Prefer lsp over grepping blindly for definitions/references in TS/JS/Python.",
     "- Prefer web_fetch on a known docs URL; use web_search only when you need a starting point.",
+    "- Prefer loading a matching skill with the skill tool before inventing a one-off workflow.",
+    "- To install skills from the network, use skill_install with an OpenCode HTTP catalog URL (serves index.json), or write SKILL.md via skill-creator.",
     "- When editing, keep changes focused on the task.",
     "- When done, give a short summary of what changed.",
   ].join("\n");

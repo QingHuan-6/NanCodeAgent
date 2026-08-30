@@ -6,13 +6,15 @@ import { grepTool } from "./grep.js";
 import { lspTool } from "./lsp.js";
 import { readFileTool } from "./read_file.js";
 import { ToolRegistry } from "./registry.js";
+import { skillTool } from "./skill.js";
+import { skillInstallTool } from "./skill_install.js";
 import { todoWriteTool } from "./todo_write.js";
 import { webFetchTool, webSearchTool } from "./web.js";
 import { writeFileTool } from "./write_file.js";
 
 export type AgentToolMode = "agent" | "plan";
 
-/** Plan mode: exploration + ask/search/lsp (no write/edit/bash). */
+/** Plan mode: exploration + ask/search/lsp/skill (no write/edit/bash). */
 const PLAN_TOOLS = new Set([
   "read_file",
   "glob",
@@ -22,6 +24,8 @@ const PLAN_TOOLS = new Set([
   "web_fetch",
   "web_search",
   "lsp",
+  "skill",
+  "skill_install",
 ]);
 
 /** Full tool set. */
@@ -38,6 +42,8 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(lspTool);
+  registry.register(skillTool);
+  registry.register(skillInstallTool);
   return registry;
 }
 
@@ -51,6 +57,8 @@ export function createPlanRegistry(): ToolRegistry {
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(lspTool);
+  registry.register(skillTool);
+  registry.register(skillInstallTool);
   return registry;
 }
 

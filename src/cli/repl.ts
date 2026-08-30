@@ -184,7 +184,7 @@ async function handleSlash(
         runtime.setMode("plan");
         ctx.tools = runtime.tools;
         console.log(
-          "Plan mode: read/glob/grep/todo/ask/web/lsp (no writes).",
+          "Plan mode: read/glob/grep/todo/ask/web/lsp/skill (no writes).",
         );
       } catch (err) {
         console.error(`[error] ${err instanceof Error ? err.message : err}`);

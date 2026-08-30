@@ -30,6 +30,7 @@ import type {
   AgentLoopResult,
   ToolExecutionMode,
 } from "./types.js";
+import { syncConfiguredSkillSources } from "../skills/discover.js";
 
 export interface AgentRuntimeOptions {
   config: Config;
@@ -229,6 +230,9 @@ export class AgentRuntime {
     const ac = new AbortController();
     this.activeAbort = ac;
     try {
+      // OpenCode-style: pull HTTP skill catalogs into cache before advertising.
+      await syncConfiguredSkillSources(this.config.workspace);
+      this.refreshSystemPrompt();
       return await executor(ac.signal);
     } finally {
       this.running = false;
