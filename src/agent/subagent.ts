@@ -129,19 +129,19 @@ export async function runSubagent(
   const roleLines =
     req.subagentType === "explorer"
       ? [
-          "You are a **read-only explorer subagent**.",
+          "You are a read-only explorer subagent.",
           "Investigate and report findings. Do not claim you modified files.",
           "End with a concise summary the parent agent can use.",
         ]
       : [
-          "You are a **worker subagent**.",
+          "You are a worker subagent.",
           "Complete the assigned task in the workspace, then summarize what you changed.",
           "Do not spawn further subagents (task tool unavailable).",
         ];
 
   if (!isResume && forkedMessages > 0) {
     roleLines.push(
-      "Earlier messages are **forked parent context for reference only**.",
+      "Earlier messages are forked parent context for reference only.",
       "Your active assignment is the latest user message in this session.",
       "Do not continue the parent's orchestration or re-delegate; do the delegated work yourself.",
     );

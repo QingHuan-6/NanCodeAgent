@@ -14,6 +14,7 @@ export type SlashAction =
   | { type: "sessions" }
   | { type: "plan" }
   | { type: "agent" }
+  | { type: "memory"; arg?: string }
   | { type: "unknown"; name: string };
 
 export function parseSlashCommand(line: string): SlashAction | null {
@@ -58,6 +59,9 @@ export function parseSlashCommand(line: string): SlashAction | null {
     case "code":
     case "act":
       return { type: "agent" };
+    case "memory":
+    case "mem":
+      return { type: "memory", arg: arg || undefined };
     default:
       return { type: "unknown", name: name || "?" };
   }
@@ -68,8 +72,9 @@ export function helpText(): string {
     "Commands:",
     "  /help       Show this help",
     "  /status     Session / model / workspace / mode",
-    "  /plan       Read-only plan mode (read/glob/grep/todo/ask/web/lsp/skill/task)",
-    "  /agent      Full agent mode (write/edit/bash + ask/web/lsp/skill/task)",
+    "  /memory     Memory panel · /memory on|off|toggle [user|project]",
+    "  /plan       Read-only plan mode (read/glob/grep/todo/ask/web/lsp/skill/task/memory)",
+    "  /agent      Full agent mode (write/edit/bash + ask/web/lsp/skill/task/memory)",
     "  /setup      Re-run API key / provider setup",
     "  /clear      Clear conversation history",
     "  /compact    Summarize older context (optional: /compact focus on auth)",

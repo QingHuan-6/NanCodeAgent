@@ -116,6 +116,11 @@ function toolSubjectInner(
         typeof args.description === "string" ? args.description : "task";
       return clip(`${type}: ${desc}`, 70);
     }
+    case "memory": {
+      const op = typeof args.operation === "string" ? args.operation : "memory";
+      const p = typeof args.path === "string" ? args.path : "MEMORY.md";
+      return clip(`${op} ${p}`, 70);
+    }
     default:
       return clip(JSON.stringify(args), 70);
   }
@@ -158,6 +163,8 @@ function toolRunningLabelInner(toolName: string, subject: string): string {
       return `Installing skills from ${subject}`;
     case "task":
       return `Delegating ${subject}`;
+    case "memory":
+      return `Memory ${subject}`;
     default:
       return `Running ${toolName} ${subject}`.trim();
   }
@@ -220,6 +227,8 @@ function toolDoneLabelInner(
       return `Installed skills from ${subject}`;
     case "task":
       return `Delegated ${subject}`;
+    case "memory":
+      return `Memory ${subject}`;
     default:
       return `Finished ${toolName}${subject ? ` ${subject}` : ""}`;
   }

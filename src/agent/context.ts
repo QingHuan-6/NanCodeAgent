@@ -1,15 +1,31 @@
 /**
  * Context window helpers — prune without splitting assistant tool_calls
  * from their following tool results (claw / Pi safety rule).
+ *
+ * Progressive stack (Claude-inspired):
+ *   1. spill at tool time (tools/spill.ts)
+ *   2. microcompact — stub old tool bodies (read-time projection)
+ *   3. prune / snip — drop oldest blocks under char budget
+ *   4. LLM /compact — runtime auto + manual (compact.ts)
  */
 
 import type { ChatMessage } from "../llm/types.js";
+import {
+  microcompactMessages,
+  type MicrocompactOptions,
+} from "./microcompact.js";
 
 export interface PruneOptions {
   /** Soft char budget for non-system messages (default ~120k). */
   maxChars?: number;
   /** Always keep at least this many trailing blocks (default 4). */
   preserveRecentBlocks?: number;
+}
+
+export interface LayeredTransformOptions extends PruneOptions {
+  /** Skip microcompact (default false). */
+  skipMicrocompact?: boolean;
+  microcompact?: MicrocompactOptions;
 }
 
 /** Rough size estimate — chars, not tokenizer tokens. */
@@ -46,7 +62,11 @@ export function groupMessageBlocks(messages: ChatMessage[]): ChatMessage[][] {
       const needed = new Set(msg.tool_calls!.map((c) => c.id));
       while (i < messages.length && needed.size > 0) {
         const next = messages[i]!;
-        if (next.role === "tool" && next.tool_call_id && needed.has(next.tool_call_id)) {
+        if (
+          next.role === "tool" &&
+          next.tool_call_id &&
+          needed.has(next.tool_call_id)
+        ) {
           block.push(next);
           needed.delete(next.tool_call_id);
           i += 1;
@@ -108,11 +128,30 @@ export function pruneMessagesForContext(
   return [...system, note, ...kept.flat()];
 }
 
+/**
+ * Claude-inspired progressive projection for each LLM call:
+ * microcompact (stub old tools) → prune (drop oldest blocks).
+ * Does not rewrite session storage (collapse-like read projection).
+ */
+export function applyContextLayers(
+  messages: ChatMessage[],
+  options: LayeredTransformOptions = {},
+): ChatMessage[] {
+  let next = messages;
+  if (!options.skipMicrocompact) {
+    next = microcompactMessages(next, options.microcompact).messages;
+  }
+  return pruneMessagesForContext(next, {
+    maxChars: options.maxChars,
+    preserveRecentBlocks: options.preserveRecentBlocks,
+  });
+}
+
 /** Default transformContext used by AgentRuntime / CLI. */
 export function createDefaultTransformContext(
-  options: PruneOptions = {},
+  options: LayeredTransformOptions = {},
 ): (messages: ChatMessage[]) => ChatMessage[] {
-  return (messages) => pruneMessagesForContext(messages, options);
+  return (messages) => applyContextLayers(messages, options);
 }
 
 /**

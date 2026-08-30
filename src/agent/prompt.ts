@@ -2,6 +2,11 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  formatGlobalAgentsSection,
+  formatMemoryPromptSection,
+  loadProgressMarkdown,
+} from "../memory/index.js";
 import { formatSkillsPromptSection } from "../skills/index.js";
 
 const MAX_INSTRUCTION_CHARS = 8_000;
@@ -25,9 +30,24 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     buildEnvironmentSection(workspace),
   ];
 
+  const globalAgents = formatGlobalAgentsSection();
+  if (globalAgents) {
+    sections.push(globalAgents);
+  }
+
   const projectInstructions = loadProjectInstructions(workspace);
   if (projectInstructions) {
     sections.push(`# Project instructions\n\n${projectInstructions}`);
+  }
+
+  const progress = loadProgressMarkdown(workspace);
+  if (progress) {
+    sections.push(`# Progress handoff\n\n${progress}`);
+  }
+
+  const memory = formatMemoryPromptSection(workspace);
+  if (memory) {
+    sections.push(memory);
   }
 
   const skills = formatSkillsPromptSection({ workspace });
@@ -40,6 +60,7 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   }
 
   sections.push(buildToolPolicySection(mode));
+  sections.push(buildReplyStyleSection());
   return sections.join("\n\n");
 }
 
@@ -48,10 +69,11 @@ function buildRoleSection(mode: "agent" | "plan"): string {
     return [
       "# Role",
       "",
-      "You are NanCodeAgent in **plan mode** (read-only).",
+      "You are NanCodeAgent in plan mode (read-only).",
       "Explore with read_file / glob / grep; use todo_write for multi-step plans.",
       "Use ask_user when requirements are ambiguous; web_search/web_fetch for public docs; lsp for symbols/defs.",
       "If an Available skill matches the task, call `skill` to load its instructions before planning.",
+      "Use `memory` to read durable notes; prefer not to rewrite memory while only planning.",
       "For large investigation, use `task` with subagent_type=explorer (read-only child session).",
       "Do NOT modify files or run shell commands — those tools are unavailable.",
       "Produce a clear implementation plan: goals, files to touch, steps, risks.",
@@ -70,6 +92,7 @@ function buildRoleSection(mode: "agent" | "plan"): string {
     "Use web_search / web_fetch for public documentation (not private/local URLs).",
     "Use lsp for go-to-definition, references, hover, and symbols when available.",
     "Use `task` to delegate: explorer (read-only research) or worker (bounded edits/bash). Default forks parent history; use fork_turns=none for a clean spawn. Pass task_id to resume.",
+    "Use `memory` for durable cross-session notes (MEMORY.md index + topic files under the user memory dir).",
     "Never invent file contents — call read_file when unsure.",
     "If a tool fails, read the error, adjust, and retry with a different approach.",
     "If tool output was saved to .nan/tool-output/, use read_file to inspect the rest.",
@@ -99,12 +122,13 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     return [
       "# Tool policy (plan mode)",
       "",
-      "- Allowed: read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp, skill, skill_install, task (explorer only).",
+      "- Allowed: read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp, skill, skill_install, task (explorer only), memory.",
       "- Forbidden: write_file, edit_file, bash, worker subagents, and any workspace mutation.",
       "- For multi-step plans, use todo_write to list concrete steps before finishing.",
       "- When a listed skill matches, call skill before drafting the plan.",
       "- To add a remote OpenCode-style catalog, use skill_install with an https base URL (index.json).",
       "- For heavy read-only research, call task with subagent_type=explorer; use the returned task_id to continue.",
+      "- Read auto-memory with memory(operation=read|list); avoid large rewrites in plan mode.",
       "- Stay inside the workspace for file tools; web_* are for public internet only.",
       "- End with a concrete plan the user can approve before switching to /agent.",
     ].join("\n");
@@ -122,8 +146,20 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     "- To install skills from the network, use skill_install with an OpenCode HTTP catalog URL (serves index.json), or write SKILL.md via skill-creator.",
     "- Use task for isolated research (explorer) or a bounded implementation slice (worker). Default fork_turns=all copies parent context (efficient); fork_turns=none for a blank specialist. Children cannot nest another task.",
     "- Resume a child with the same task_id + subagent_type from a prior <task_result>.",
+    "- Use memory to record durable learnings (build commands, fixes, preferences). Keep MEMORY.md short; details in topic .md files.",
+    "- For multi-hour work, maintain .nan/PROGRESS.md (or PROGRESS.md) with status and next steps so /compact or a new session can continue.",
     "- When editing, keep changes focused on the task.",
     "- When done, give a short summary of what changed.",
+  ].join("\n");
+}
+
+function buildReplyStyleSection(): string {
+  return [
+    "# Reply style (terminal)",
+    "",
+    "Write for a terminal transcript. Prefer short ## / ### headings, bullet lists, and `inline code` / fenced code blocks.",
+    "Use [title](url) for links. Avoid decorative bold/italic; reserve emphasis for rare must-see warnings.",
+    "Lead with the answer; skip long preambles. Keep summaries tight.",
   ].join("\n");
 }
 

@@ -9,6 +9,10 @@ import type { ToolRegistry } from "../tools/registry.js";
 import { createPrinter } from "./printer.js";
 import { runSetupWizard } from "./setup.js";
 import { helpText, parseSlashCommand, type SlashAction } from "./slash.js";
+import {
+  applyMemorySlash,
+  parseMemorySlashArg,
+} from "../memory/index.js";
 
 export interface ReplContext {
   config: Config;
@@ -143,6 +147,18 @@ async function handleSlash(
         ].join("\n"),
       );
       return false;
+    case "memory": {
+      const parsed = parseMemorySlashArg(slash.arg ?? "");
+      if (parsed.kind === "error") {
+        console.log(parsed.message);
+        return false;
+      }
+      console.log(applyMemorySlash(ctx.config.workspace, parsed));
+      if (parsed.kind !== "status") {
+        runtime.refreshSystemPrompt();
+      }
+      return false;
+    }
     case "setup": {
       await runSetupWizard({ rl });
       ctx.config = loadConfig(ctx.config.workspace);

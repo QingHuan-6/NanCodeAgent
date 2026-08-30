@@ -29,10 +29,13 @@ export { DoomLoopGuard } from "./doom-loop.js";
 export {
   compactMessagesInPlace,
   createDefaultTransformContext,
+  applyContextLayers,
   pruneMessagesForContext,
   estimateMessagesChars,
   groupMessageBlocks,
 } from "./context.js";
+export { microcompactMessages } from "./microcompact.js";
+export type { MicrocompactOptions } from "./microcompact.js";
 export {
   prepareCompact,
   compactMessages,

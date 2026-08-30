@@ -8,6 +8,7 @@ import { editFileTool } from "./edit_file.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lspTool } from "./lsp.js";
+import { memoryTool } from "./memory.js";
 import { readFileTool } from "./read_file.js";
 import { ToolRegistry } from "./registry.js";
 import { skillTool } from "./skill.js";
@@ -28,6 +29,7 @@ export function createSubagentRegistry(type: SubagentType): ToolRegistry {
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);
+  registry.register(memoryTool);
 
   if (type === "worker") {
     registry.register(writeFileTool);

@@ -209,7 +209,8 @@ export class AgentRuntime {
     return result;
   }
 
-  private refreshSystemPrompt(): void {
+  /** Rebuild system prompt (e.g. after /memory toggle). */
+  refreshSystemPrompt(): void {
     const system: ChatMessage = {
       role: "system",
       content: buildSystemPrompt({
@@ -244,6 +245,12 @@ export class AgentRuntime {
     let skipInitial = this.skipInitialSteeringPoll;
     const prune = createDefaultTransformContext({
       maxChars: this.contextMaxChars,
+      preserveRecentBlocks: 4,
+      microcompact: {
+        preserveRecentBlocks: 8,
+        maxToolChars: 800,
+        maxAssistantChars: 2_000,
+      },
     });
 
     return {

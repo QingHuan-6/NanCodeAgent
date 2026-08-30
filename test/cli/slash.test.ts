@@ -26,6 +26,15 @@ describe("slash commands", () => {
     });
     expect(parseSlashCommand("/plan")).toEqual({ type: "plan" });
     expect(parseSlashCommand("/agent")).toEqual({ type: "agent" });
+    expect(parseSlashCommand("/memory")).toEqual({ type: "memory" });
+    expect(parseSlashCommand("/memory off")).toEqual({
+      type: "memory",
+      arg: "off",
+    });
+    expect(parseSlashCommand("/memory on project")).toEqual({
+      type: "memory",
+      arg: "on project",
+    });
     expect(parseSlashCommand("/resume abc")).toEqual({
       type: "resume",
       id: "abc",
@@ -49,6 +58,7 @@ describe("slash commands", () => {
     expect(text).toContain("/continue");
     expect(text).toContain("/compact");
     expect(text).toContain("/plan");
+    expect(text).toContain("/memory");
     expect(text).toContain("steer");
   });
 });

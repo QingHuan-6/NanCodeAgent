@@ -383,6 +383,7 @@ Windows：优先 `shell: true` 或显式 `npx.cmd`（你们 LSP 已有教训）�
 
 - Codex Customization（skills+MCP+subagents 关系）：https://developers.openai.com/codex/concepts/customization  
 - Nan 上下文笔记 Phase 3（薄 skills）：[`03-上下文管理调研与落地.md`](./03-上下文管理调研与落地.md)
+- Memory（指令 / 自动笔记 / 会话）：[`07-Memory调研.md`](./07-Memory调研.md)
 
 ---
 

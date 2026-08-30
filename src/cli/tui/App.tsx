@@ -14,7 +14,12 @@ import {
 } from "../../session/todo.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { helpText, parseSlashCommand } from "../slash.js";
+import {
+  applyMemorySlash,
+  parseMemorySlashArg,
+} from "../../memory/index.js";
 import { theme } from "./theme.js";
+import { MarkdownView } from "./MarkdownView.js";
 import { ToolCard } from "./ToolCard.js";
 import {
   nextId,
@@ -396,13 +401,42 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ].join("\n"),
           });
           return true;
+        case "memory": {
+          const parsed = parseMemorySlashArg(slash.arg ?? "");
+          if (parsed.kind === "error") {
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: parsed.message,
+            });
+            return true;
+          }
+          const text = applyMemorySlash(config.workspace, parsed);
+          if (parsed.kind !== "status") {
+            try {
+              runtime.refreshSystemPrompt();
+            } catch (err) {
+              pushItem({
+                id: nextId("err"),
+                kind: "error",
+                text: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+          pushItem({
+            id: nextId("sys"),
+            kind: "system",
+            text,
+          });
+          return true;
+        }
         case "plan":
           try {
             runtime.setMode("plan");
             pushItem({
               id: nextId("sys"),
               kind: "system",
-              text: "Plan mode on — read/glob/grep/todo/ask/web/lsp/skill (no writes).",
+              text: "Plan mode on — read/glob/grep/todo/ask/web/lsp/skill/task/memory (no workspace writes).",
             });
           } catch (err) {
             pushItem({
@@ -664,7 +698,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           <Text color={theme.brand} bold>
             Assistant
           </Text>
-          <Text color={theme.assistant}>{streamBuffer}</Text>
+          <MarkdownView source={streamBuffer} />
           <Text dimColor>▊</Text>
         </Box>
       ) : null}
@@ -811,7 +845,7 @@ function TimelineRow({
           <Text color={theme.brand} bold>
             Assistant
           </Text>
-          <Text>{item.text}</Text>
+          <MarkdownView source={item.text} />
         </Box>
       );
     case "tool":
