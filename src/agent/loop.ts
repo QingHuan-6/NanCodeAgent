@@ -209,6 +209,17 @@ async function runTurns(
             askUser,
             signal: options.signal,
             toolExecution: options.toolExecution ?? "parallel",
+            agent: {
+              llm: options.llm,
+              onEvent,
+              askPermission: ask,
+              askUser,
+              signal: options.signal,
+              transformContext: options.transformContext,
+              maxSubagentDepth: options.maxSubagentDepth,
+              mode: options.mode ?? "agent",
+              getParentMessages: () => options.session.getMessages(),
+            },
           });
 
           for (const message of toolItemsToMessages(batch.items)) {

@@ -50,6 +50,27 @@ export function toolSubject(
   toolName: string,
   args: Record<string, unknown>,
 ): string {
+  const { name } = splitSubagentTool(toolName);
+  return toolSubjectInner(name, args);
+}
+
+function splitSubagentTool(toolName: string): {
+  name: string;
+  prefix?: string;
+} {
+  if (toolName.startsWith("explorer.")) {
+    return { name: toolName.slice("explorer.".length), prefix: "explorer" };
+  }
+  if (toolName.startsWith("worker.")) {
+    return { name: toolName.slice("worker.".length), prefix: "worker" };
+  }
+  return { name: toolName };
+}
+
+function toolSubjectInner(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
   switch (toolName) {
     case "grep": {
       const pattern = typeof args.pattern === "string" ? args.pattern : "";
@@ -88,6 +109,13 @@ export function toolSubject(
       return clip(String(args.name ?? "skill"), 70);
     case "skill_install":
       return clip(String(args.source ?? ""), 70);
+    case "task": {
+      const type =
+        typeof args.subagent_type === "string" ? args.subagent_type : "?";
+      const desc =
+        typeof args.description === "string" ? args.description : "task";
+      return clip(`${type}: ${desc}`, 70);
+    }
     default:
       return clip(JSON.stringify(args), 70);
   }
@@ -95,6 +123,12 @@ export function toolSubject(
 
 /** Progressive: "Searching…" */
 export function toolRunningLabel(toolName: string, subject: string): string {
+  const { name, prefix } = splitSubagentTool(toolName);
+  const label = toolRunningLabelInner(name, subject);
+  return prefix ? `${prefix} · ${label}` : label;
+}
+
+function toolRunningLabelInner(toolName: string, subject: string): string {
   switch (toolName) {
     case "grep":
       return `Searching for ${subject}`;
@@ -122,6 +156,8 @@ export function toolRunningLabel(toolName: string, subject: string): string {
       return `Loading skill ${subject}`;
     case "skill_install":
       return `Installing skills from ${subject}`;
+    case "task":
+      return `Delegating ${subject}`;
     default:
       return `Running ${toolName} ${subject}`.trim();
   }
@@ -134,9 +170,20 @@ export function toolDoneLabel(
   output: string | undefined,
   isError: boolean,
 ): string {
+  const { name, prefix } = splitSubagentTool(toolName);
   if (isError) {
-    return `Failed ${toolName}${subject ? ` ${subject}` : ""}`;
+    const fail = `Failed ${name}${subject ? ` ${subject}` : ""}`;
+    return prefix ? `${prefix} · ${fail}` : fail;
   }
+  const label = toolDoneLabelInner(name, subject, output);
+  return prefix ? `${prefix} · ${label}` : label;
+}
+
+function toolDoneLabelInner(
+  toolName: string,
+  subject: string,
+  output: string | undefined,
+): string {
   const count = matchCount(output);
   switch (toolName) {
     case "grep":
@@ -171,6 +218,8 @@ export function toolDoneLabel(
       return `Loaded skill ${subject}`;
     case "skill_install":
       return `Installed skills from ${subject}`;
+    case "task":
+      return `Delegated ${subject}`;
     default:
       return `Finished ${toolName}${subject ? ` ${subject}` : ""}`;
   }

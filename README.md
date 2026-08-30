@@ -6,7 +6,7 @@ No agent frameworks (no LangChain, Agents SDK, etc.): the harness loop, tools, a
 
 ## Status
 
-Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + **skills** + LLM /compact + tool-output spill + session resume.
+Interactive Ink TUI + parallel tools + steer + glob/grep + plan mode + todo_write + ask_user + web_fetch/web_search + lsp + **skills** + **subagents (`task`)** + LLM /compact + tool-output spill + session resume.
 
 ## Setup
 
@@ -50,9 +50,10 @@ Inside TUI / REPL: `/help` `/status` `/plan` `/agent` `/clear` `/compact` `/cont
 While busy in TUI: **Enter steers** (injects after current tools); Esc aborts.  
 Setup: `nan-agent --setup` (or `/setup` in `--plain` mode)
 
-**Modes:** `/plan` = read-only (read/glob/grep + todo/ask/web/lsp). `/agent` = full tools (write/edit/bash + the same).  
+**Modes:** `/plan` = read-only (read/glob/grep + todo/ask/web/lsp/skill + `task` explorer). `/agent` = full tools (write/edit/bash + the same + `task` worker).  
 Multi-step work: the model can call `todo_write` to keep a live checklist (shown above the prompt).  
 Clarifying questions: `ask_user` (TUI options / free text). Public docs: `web_search` + `web_fetch` (SSRF-blocked). Code intel: `lsp` (TS/JS via typescript-language-server, Python via pyright — first call may `npx` download).  
+**Subagents:** `task` spawns an in-process child session — `explorer` (read-only) or `worker` (write/edit/bash). **Default forks parent history** (Codex-style) so the child reuses prior context; set `fork_turns=none` for a clean spawn, or `fork_turns=N` for the last N user turns. Children cannot nest another `task` (depth default 1; `NAN_SUBAGENT_DEPTH`). Resume with `task_id`. Child tools show as `explorer.*` / `worker.*` in the TUI.  
 **Skills (any folder):** built-in skills ship in `bundled-skills/` (`commit-message`, `skill-creator`). Also scans Claude/OpenCode-compatible dirs and walks up to the git root.  
 **Remote catalogs (OpenCode-style):** put URLs/dirs in `.nan/skills.json` or `~/.nan-agent/skills.json`:
 
@@ -98,10 +99,10 @@ src/
   index.ts          CLI entry (setup / TUI / plain / one-shot)
   config/           runtime config + ~/.nan-agent .env
   llm/              OpenAI-compatible client (+ SSE stream)
-  tools/            read/write/edit/bash/glob/grep/todo/ask/web/lsp/skill (+ spill)
+  tools/            read/write/edit/bash/glob/grep/todo/ask/web/lsp/skill/task (+ spill)
   skills/           SKILL.md discovery + catalog helpers
   bundled-skills/   built-in skills shipped with the npm package
-  agent/            loop, runtime, prompt, events
+  agent/            loop, runtime, prompt, events, subagent
   session/          message history + resume + todos
   lsp/              minimal stdio LSP client
   permissions.ts    workspace gate
@@ -109,7 +110,7 @@ src/
 test/               Vitest suite
 ```
 
-Not in scope for this harness (product-scale): MCP, notebooks, sub-agents.
+Not in scope for this harness (product-scale): MCP, notebooks, background/parallel subagents, cross-CLI bridges (Claude/Codex ACP).
 ## Secrets
 
 API keys live in environment, project `.env`, or `~/.nan-agent/.env` — never in the git repo.

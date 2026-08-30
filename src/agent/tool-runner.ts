@@ -1,7 +1,7 @@
 import type { ChatMessage, ToolCall } from "../llm/types.js";
 import { checkPermission } from "../permissions.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ToolResult } from "../tools/types.js";
+import type { AgentHostContext, ToolResult } from "../tools/types.js";
 import { emitEvent, type AgentEventHandler } from "./events.js";
 import type {
   BeforeToolCallResult,
@@ -31,6 +31,8 @@ export interface RunToolBatchOptions {
     question: string;
     options?: string[];
   }) => Promise<string>;
+  /** Host for nested agents (`task` tool). */
+  agent?: AgentHostContext;
   signal?: AbortSignal;
   /** Default parallel (Pi). */
   toolExecution?: ToolExecutionMode;
@@ -58,10 +60,13 @@ export async function runToolBatch(
   toolCalls: ToolCall[],
   options: RunToolBatchOptions,
 ): Promise<{ items: ToolBatchItem[]; terminateBatch: boolean }> {
-  // ask_user must not race with other tools in the same batch.
+  // ask_user / task must not race with other tools in the same batch.
   const needsSequential =
     options.toolExecution === "sequential" ||
-    toolCalls.some((c) => c.function?.name === "ask_user");
+    toolCalls.some(
+      (c) =>
+        c.function?.name === "ask_user" || c.function?.name === "task",
+    );
 
   const mode = needsSequential
     ? "sequential"
@@ -172,6 +177,7 @@ async function executeOne(
     workspace: options.workspace,
     sessionId: options.sessionId,
     askUser: options.askUser,
+    agent: options.agent,
   });
   const isError = result.output.startsWith(`Tool "${call.name}" failed:`);
   const item: ToolBatchItem = { call, result, isError };

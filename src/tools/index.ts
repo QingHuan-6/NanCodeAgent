@@ -8,13 +8,14 @@ import { readFileTool } from "./read_file.js";
 import { ToolRegistry } from "./registry.js";
 import { skillTool } from "./skill.js";
 import { skillInstallTool } from "./skill_install.js";
+import { taskTool } from "./task.js";
 import { todoWriteTool } from "./todo_write.js";
 import { webFetchTool, webSearchTool } from "./web.js";
 import { writeFileTool } from "./write_file.js";
 
 export type AgentToolMode = "agent" | "plan";
 
-/** Plan mode: exploration + ask/search/lsp/skill (no write/edit/bash). */
+/** Plan mode: exploration + ask/search/lsp/skill/task(explorer) (no write/edit/bash). */
 const PLAN_TOOLS = new Set([
   "read_file",
   "glob",
@@ -26,6 +27,7 @@ const PLAN_TOOLS = new Set([
   "lsp",
   "skill",
   "skill_install",
+  "task",
 ]);
 
 /** Full tool set. */
@@ -44,6 +46,7 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);
+  registry.register(taskTool);
   return registry;
 }
 
@@ -59,6 +62,7 @@ export function createPlanRegistry(): ToolRegistry {
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);
+  registry.register(taskTool);
   return registry;
 }
 
@@ -72,6 +76,7 @@ export function isPlanTool(name: string): boolean {
 
 export { ToolRegistry } from "./registry.js";
 export type {
+  AgentHostContext,
   AskUserRequest,
   ToolContext,
   ToolDefinition,

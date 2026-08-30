@@ -91,6 +91,11 @@ export interface AgentLoopOptions {
    * Should compact the session in place and return true to retry the call.
    */
   onContextOverflow?: () => Promise<boolean> | boolean;
+  /**
+   * Max nesting depth for `task` subagents (default env NAN_SUBAGENT_DEPTH or 1).
+   * Depth 1 = parent may spawn children; children cannot spawn further.
+   */
+  maxSubagentDepth?: number;
 }
 
 export interface BeforeToolCallResult {

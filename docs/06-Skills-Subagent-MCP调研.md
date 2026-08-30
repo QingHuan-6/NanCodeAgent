@@ -390,6 +390,6 @@ Windows：优先 `shell: true` 或显式 `npx.cmd`（你们 LSP 已有教训）�
 
 - [x] Skills：discover + prompt 广告 + `skill` 工具 + 单测  
 - [x] Skills HTTP catalog（OpenCode）：`skills.json` + cache + `skill_install`  
-- [ ] Sub-agent：同步 `task` + depth=1 + 工具裁剪 + TUI 一行  
+- [x] Sub-agent：同步 `task` + depth=1 + 工具裁剪（explorer/worker）+ **Codex 式 fork（默认 all）** + `task_id` 续聊 + TUI `explorer.*`/`worker.*`  
 - [ ] （可选）MCP stdio 骨架 + 一个 filesystem server 演示  
-- [ ] README「有意不做」：OAuth MCP、continuable 子会话、跨 CLI 桥  
+- [ ] README「有意不做」：OAuth MCP、后台并行子会话、跨 CLI 桥  

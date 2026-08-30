@@ -1,9 +1,26 @@
 import type { ToolUiMeta } from "../agent/events.js";
-import type { OpenAIToolDefinition, ToolParameterSchema } from "../llm/types.js";
+import type { AgentEventHandler } from "../agent/events.js";
+import type { AgentLoopOptions, LlmChatPort } from "../agent/types.js";
+import type { ChatMessage, OpenAIToolDefinition, ToolParameterSchema } from "../llm/types.js";
 
 export interface AskUserRequest {
   question: string;
   options?: string[];
+}
+
+/** Host capabilities so tools like `task` can spawn nested agent loops. */
+export interface AgentHostContext {
+  llm: LlmChatPort;
+  onEvent?: AgentEventHandler;
+  askPermission?: (reason: string, toolName: string) => Promise<boolean>;
+  askUser?: (req: AskUserRequest) => Promise<string>;
+  signal?: AbortSignal;
+  transformContext?: AgentLoopOptions["transformContext"];
+  maxSubagentDepth?: number;
+  /** Parent agent mode — plan forbids worker subagents. */
+  mode?: "agent" | "plan";
+  /** Snapshot parent history for Codex-style fork (exclude live share). */
+  getParentMessages?: () => ChatMessage[];
 }
 
 export interface ToolContext {
@@ -12,6 +29,8 @@ export interface ToolContext {
   sessionId?: string;
   /** Interactive Q&A (ask_user tool). */
   askUser?: (req: AskUserRequest) => Promise<string>;
+  /** Parent agent host (required for task / subagents). */
+  agent?: AgentHostContext;
 }
 
 export interface ToolResult {

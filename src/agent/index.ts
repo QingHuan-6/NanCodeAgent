@@ -1,6 +1,21 @@
 export { continueAgentLoop, runAgentLoop } from "./loop.js";
 export { AgentRuntime } from "./runtime.js";
 export type { AgentRuntimeOptions } from "./runtime.js";
+export {
+  clearSubagentChildren,
+  getSubagentDepth,
+  runSubagent,
+} from "./subagent.js";
+export type {
+  SubagentRunRequest,
+  SubagentRunResult,
+  SubagentType,
+} from "./subagent.js";
+export {
+  forkParentMessages,
+  parseForkTurns,
+} from "./fork-context.js";
+export type { ForkTurns } from "./fork-context.js";
 export type {
   AgentLoopOptions,
   AgentLoopResult,
