@@ -37,6 +37,15 @@ describe("slash commands", () => {
       type: "memory",
       arg: "on project",
     });
+    expect(parseSlashCommand("/web")).toEqual({ type: "web" });
+    expect(parseSlashCommand("/web off")).toEqual({
+      type: "web",
+      arg: "off",
+    });
+    expect(parseSlashCommand("/net on project")).toEqual({
+      type: "web",
+      arg: "on project",
+    });
     expect(parseSlashCommand("/resume abc")).toEqual({
       type: "resume",
       id: "abc",
@@ -62,6 +71,7 @@ describe("slash commands", () => {
     expect(text).toContain("/context");
     expect(text).toContain("/plan");
     expect(text).toContain("/memory");
+    expect(text).toContain("/web");
     expect(text).toContain("steer");
   });
 });

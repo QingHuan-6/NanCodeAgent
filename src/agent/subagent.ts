@@ -86,7 +86,7 @@ export async function runSubagent(
   }
 
   const childDepth = req.depth + 1;
-  const tools = createSubagentRegistry(req.subagentType);
+  const tools = createSubagentRegistry(req.subagentType, req.workspace);
   const maxTurns = req.maxTurns ?? (req.subagentType === "explorer" ? 12 : 20);
   const forkTurns: ForkTurns = req.forkTurns ?? "all";
 
@@ -150,6 +150,7 @@ export async function runSubagent(
   const systemContent = buildSystemPrompt({
     workspace: req.workspace,
     mode,
+    webEnabled: tools.has("web_search") || tools.has("web_fetch"),
     extraInstructions: roleLines.join(" "),
   });
   const msgs = record.session.getMessages().filter((m) => m.role !== "system");

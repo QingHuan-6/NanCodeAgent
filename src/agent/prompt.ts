@@ -17,6 +17,8 @@ export interface SystemPromptOptions {
   extraInstructions?: string;
   /** agent = full tools; plan = read-only exploration. */
   mode?: "agent" | "plan";
+  /** When false, omit web_search / web_fetch guidance (tools not registered). */
+  webEnabled?: boolean;
 }
 
 /**
@@ -25,8 +27,9 @@ export interface SystemPromptOptions {
 export function buildSystemPrompt(options: SystemPromptOptions): string {
   const workspace = path.resolve(options.workspace);
   const mode = options.mode ?? "agent";
+  const web = options.webEnabled !== false;
   const sections: string[] = [
-    buildRoleSection(mode),
+    buildRoleSection(mode, web),
     buildEnvironmentSection(workspace),
   ];
 
@@ -59,19 +62,22 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     sections.push(`# Additional instructions\n\n${options.extraInstructions.trim()}`);
   }
 
-  sections.push(buildToolPolicySection(mode));
+  sections.push(buildToolPolicySection(mode, web));
   sections.push(buildReplyStyleSection());
   return sections.join("\n\n");
 }
 
-function buildRoleSection(mode: "agent" | "plan"): string {
+function buildRoleSection(mode: "agent" | "plan", web: boolean): string {
+  const webHint = web
+    ? "Use web_search/web_fetch for public docs; "
+    : "";
   if (mode === "plan") {
     return [
       "# Role",
       "",
       "You are NanCodeAgent in plan mode (read-only).",
       "Explore with read_file / glob / grep; use todo_write for multi-step plans.",
-      "Use ask_user when requirements are ambiguous; web_search/web_fetch for public docs; lsp for symbols/defs.",
+      `Use ask_user when requirements are ambiguous; ${webHint}lsp for symbols/defs.`,
       "If an Available skill matches the task, call `skill` to load its instructions before planning.",
       "Use `memory` to read durable notes; prefer not to rewrite memory while only planning.",
       "For large investigation, use `task` with subagent_type=explorer (read-only child session).",
@@ -80,7 +86,7 @@ function buildRoleSection(mode: "agent" | "plan"): string {
       "When the plan is ready, tell the user to switch to agent mode (/agent) to execute.",
     ].join("\n");
   }
-  return [
+  const lines = [
     "# Role",
     "",
     "You are NanCodeAgent, a local coding agent running on the user's machine.",
@@ -89,14 +95,21 @@ function buildRoleSection(mode: "agent" | "plan"): string {
     "Use glob/grep to find files instead of guessing paths.",
     "If an Available skill matches the task, call `skill` to load full instructions before improvising.",
     "Use ask_user for clarifying product/API choices you cannot discover from the repo.",
-    "Use web_search / web_fetch for public documentation (not private/local URLs).",
+  ];
+  if (web) {
+    lines.push(
+      "Use web_search / web_fetch for public documentation (not private/local URLs).",
+    );
+  }
+  lines.push(
     "Use lsp for go-to-definition, references, hover, and symbols when available.",
     "Use `task` to delegate: explorer (read-only research) or worker (bounded edits/bash). Default forks parent history; use fork_turns=none for a clean spawn. Pass task_id to resume.",
     "Use `memory` for durable cross-session notes (MEMORY.md index + topic files under the user memory dir).",
     "Never invent file contents — call read_file when unsure.",
     "If a tool fails, read the error, adjust, and retry with a different approach.",
     "If tool output was saved to .nan/tool-output/, use read_file to inspect the rest.",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function buildEnvironmentSection(workspace: string): string {
@@ -117,23 +130,37 @@ function buildEnvironmentSection(workspace: string): string {
   return lines.join("\n");
 }
 
-function buildToolPolicySection(mode: "agent" | "plan"): string {
+function buildToolPolicySection(mode: "agent" | "plan", web: boolean): string {
+  const planAllowed = web
+    ? "read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp, skill, skill_install, task (explorer only), memory."
+    : "read_file, glob, grep, todo_write, ask_user, lsp, skill, skill_install, task (explorer only), memory.";
   if (mode === "plan") {
-    return [
+    const lines = [
       "# Tool policy (plan mode)",
       "",
-      "- Allowed: read_file, glob, grep, todo_write, ask_user, web_fetch, web_search, lsp, skill, skill_install, task (explorer only), memory.",
+      `- Allowed: ${planAllowed}`,
       "- Forbidden: write_file, edit_file, bash, worker subagents, and any workspace mutation.",
       "- For multi-step plans, use todo_write to list concrete steps before finishing.",
       "- When a listed skill matches, call skill before drafting the plan.",
       "- To add a remote OpenCode-style catalog, use skill_install with an https base URL (index.json).",
       "- For heavy read-only research, call task with subagent_type=explorer; use the returned task_id to continue.",
       "- Read auto-memory with memory(operation=read|list); avoid large rewrites in plan mode.",
-      "- Stay inside the workspace for file tools; web_* are for public internet only.",
+    ];
+    if (web) {
+      lines.push(
+        "- Stay inside the workspace for file tools; web_* are for public internet only.",
+      );
+    } else {
+      lines.push(
+        "- Stay inside the workspace for file tools. Web tools are disabled (/web on to enable).",
+      );
+    }
+    lines.push(
       "- End with a concrete plan the user can approve before switching to /agent.",
-    ].join("\n");
+    );
+    return lines.join("\n");
   }
-  return [
+  const lines = [
     "# Tool policy",
     "",
     "- Stay inside the workspace unless the user explicitly asks otherwise.",
@@ -141,7 +168,17 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     "- For complex multi-step tasks (≥3 steps), call todo_write first, keep one item in_progress, and mark items completed as you go.",
     "- Prefer ask_user over guessing when a requirement has multiple valid product choices.",
     "- Prefer lsp over grepping blindly for definitions/references in TS/JS/Python.",
-    "- Prefer web_fetch on a known docs URL; use web_search only when you need a starting point.",
+  ];
+  if (web) {
+    lines.push(
+      "- Prefer web_fetch on a known docs URL; use web_search only when you need a starting point.",
+    );
+  } else {
+    lines.push(
+      "- Web tools are disabled; do not invent web_search/web_fetch calls (user can /web on).",
+    );
+  }
+  lines.push(
     "- Prefer loading a matching skill with the skill tool before inventing a one-off workflow.",
     "- To install skills from the network, use skill_install with an OpenCode HTTP catalog URL (serves index.json), or write SKILL.md via skill-creator.",
     "- Use task for isolated research (explorer) or a bounded implementation slice (worker). Default fork_turns=all copies parent context (efficient); fork_turns=none for a blank specialist. Children cannot nest another task.",
@@ -150,7 +187,8 @@ function buildToolPolicySection(mode: "agent" | "plan"): string {
     "- For multi-hour work, maintain .nan/PROGRESS.md (or PROGRESS.md) with status and next steps so /compact or a new session can continue.",
     "- When editing, keep changes focused on the task.",
     "- When done, give a short summary of what changed.",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function buildReplyStyleSection(): string {

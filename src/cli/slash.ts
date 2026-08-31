@@ -16,6 +16,7 @@ export type SlashAction =
   | { type: "plan" }
   | { type: "agent" }
   | { type: "memory"; arg?: string }
+  | { type: "web"; arg?: string }
   | { type: "unknown"; name: string };
 
 export function parseSlashCommand(line: string): SlashAction | null {
@@ -66,6 +67,10 @@ export function parseSlashCommand(line: string): SlashAction | null {
     case "memory":
     case "mem":
       return { type: "memory", arg: arg || undefined };
+    case "web":
+    case "net":
+    case "network":
+      return { type: "web", arg: arg || undefined };
     default:
       return { type: "unknown", name: name || "?" };
   }
@@ -78,18 +83,20 @@ export function helpText(): string {
     "  /status     Session / model / workspace / mode / ctx%",
     "  /context    Context window estimate (usage anchor + rough)",
     "  /memory     Memory panel · /memory on|off|toggle [user|project]",
+    "  /web        Web tools · /web on|off|toggle [user|project]",
     "  /plan       Read-only plan mode (read/glob/grep/todo/ask/web/lsp/skill/task/memory)",
     "  /agent      Full agent mode (write/edit/bash + ask/web/lsp/skill/task/memory)",
     "  /setup      Re-run API key / provider setup",
     "  /clear      Clear conversation history",
     "  /compact    Summarize older context (optional: /compact focus on auth)",
     "  /continue   Resume loop from last user/tool message",
-    "  /sessions   List saved session ids",
-    "  /resume id  Load a saved session (rebuilds TUI timeline)",
+    "  /sessions   List saved session ids (short + full)",
+    "  /resume id  Load session (full id or suffix without session-)",
     "  /exit       Quit",
     "",
-    "While busy (TUI): Enter steers · Esc aborts · Ctrl+O tool detail · mouse/wheel scroll",
-    "OpenTUI sticky transcript (same toolkit as OpenCode) · Ctrl+P/N tool focus",
+    "Composer: type / then ↑↓ to pick a command · Tab to complete",
+    "While busy: Enter steers · Esc aborts · Ctrl+C copies selection (or aborts when busy)",
+    "Tools: Ctrl+O detail · Ctrl+P/N focus · mouse scroll (OpenTUI sticky)",
     "",
     "Anything else is sent as a prompt (or steer when busy).",
   ].join("\n");

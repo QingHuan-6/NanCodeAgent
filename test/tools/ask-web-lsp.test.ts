@@ -78,13 +78,22 @@ describe("lsp tool", () => {
 
 describe("registries", () => {
   it("registers ask/web/lsp in agent and plan modes", () => {
-    const agent = createDefaultRegistry();
-    const plan = createPlanRegistry();
+    const agent = createDefaultRegistry({ web: true });
+    const plan = createPlanRegistry({ web: true });
     for (const name of ["ask_user", "web_fetch", "web_search", "lsp"] as const) {
       expect(agent.has(name)).toBe(true);
       expect(plan.has(name)).toBe(true);
     }
     expect(plan.has("bash")).toBe(false);
     expect(plan.has("write_file")).toBe(false);
+  });
+
+  it("omits web tools when web is disabled", () => {
+    const agent = createDefaultRegistry({ web: false });
+    const plan = createPlanRegistry({ web: false });
+    expect(agent.has("web_search")).toBe(false);
+    expect(agent.has("web_fetch")).toBe(false);
+    expect(plan.has("web_search")).toBe(false);
+    expect(agent.has("ask_user")).toBe(true);
   });
 });

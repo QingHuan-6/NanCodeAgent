@@ -243,14 +243,18 @@ function truncateChars(text: string, max: number): string {
 export {
   globalAgentsPath,
   isAutoMemoryEnabled,
+  isWebEnabled,
   memoryIndexPath,
   projectMemoryDir,
   resolveMemoryFile,
   ensureMemoryDir,
   workspaceMemoryId,
   setAutoMemoryEnabled,
+  setWebEnabled,
   toggleAutoMemoryEnabled,
+  toggleWebEnabled,
   envAutoMemoryOverride,
+  envWebOverride,
   userSettingsPath,
   projectSettingsPath,
 } from "./paths.js";

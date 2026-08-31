@@ -13,6 +13,8 @@ import {
   applyMemorySlash,
   parseMemorySlashArg,
 } from "../memory/index.js";
+import { resolveSessionId, shortSessionId } from "../session/resolve-id.js";
+import { applyWebSlash, parseWebSlashArg } from "./web-slash.js";
 
 export interface ReplContext {
   config: Config;
@@ -168,6 +170,23 @@ async function handleSlash(
       }
       return false;
     }
+    case "web": {
+      const parsed = parseWebSlashArg(slash.arg ?? "");
+      if (parsed.kind === "error") {
+        console.log(parsed.message);
+        return false;
+      }
+      console.log(applyWebSlash(ctx.config.workspace, parsed));
+      if (parsed.kind !== "status") {
+        try {
+          runtime.refreshTools();
+          ctx.tools = runtime.tools;
+        } catch (err) {
+          console.error(`[error] ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return false;
+    }
     case "setup": {
       await runSetupWizard({ rl });
       ctx.config = loadConfig(ctx.config.workspace);
@@ -229,17 +248,20 @@ async function handleSlash(
       console.log(
         ids.length === 0
           ? "No saved sessions."
-          : ids.map((id) => `  ${id}`).join("\n"),
+          : ids
+              .map((id) => `  ${shortSessionId(id)}  (${id})`)
+              .join("\n"),
       );
       return false;
     }
     case "resume": {
       if (!slash.id) {
-        console.log("Usage: /resume <session-id>");
+        console.log("Usage: /resume <id>  (full or suffix; see /sessions)");
         return false;
       }
       try {
-        ctx.session = Session.loadFromJsonl(`sessions/${slash.id}.jsonl`, {
+        const resolved = resolveSessionId(slash.id, "sessions");
+        ctx.session = Session.loadFromJsonl(`sessions/${resolved}.jsonl`, {
           persistDir: "sessions",
         });
         runtime.session = ctx.session;

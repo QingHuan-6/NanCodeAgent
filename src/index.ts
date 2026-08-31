@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     maxRetries: config.maxRetries,
     timeoutMs: config.timeoutMs,
   });
-  const tools = createDefaultRegistry();
+  const tools = createDefaultRegistry({ workspace: config.workspace });
   const session = new Session({ persistDir: "sessions" });
 
   if (!oneShot) {

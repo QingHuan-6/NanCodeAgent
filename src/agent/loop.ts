@@ -425,6 +425,8 @@ function ensureSystemMessage(options: AgentLoopOptions): void {
       content: buildSystemPrompt({
         workspace: options.workspace,
         mode: options.mode ?? "agent",
+        webEnabled:
+          options.tools.has("web_search") || options.tools.has("web_fetch"),
       }),
     });
   }

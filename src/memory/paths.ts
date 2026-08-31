@@ -11,6 +11,8 @@ export type MemorySettingsScope = "user" | "project";
 
 export interface NanSettings {
   autoMemoryEnabled?: boolean;
+  /** When false, web_search / web_fetch are removed from the tool registry. */
+  webEnabled?: boolean;
 }
 
 /** Stable id for a workspace root (path hash). */
@@ -53,6 +55,9 @@ function readSettingsFile(file: string): NanSettings {
     const out: NanSettings = {};
     if (typeof obj.autoMemoryEnabled === "boolean") {
       out.autoMemoryEnabled = obj.autoMemoryEnabled;
+    }
+    if (typeof obj.webEnabled === "boolean") {
+      out.webEnabled = obj.webEnabled;
     }
     return out;
   } catch {
@@ -124,6 +129,65 @@ export function toggleAutoMemoryEnabled(
 ): { file: string; enabled: boolean } {
   const next = !isAutoMemoryEnabled(workspace);
   return setAutoMemoryEnabled(next, scope, workspace);
+}
+
+/** Env override when NAN_WEB is set. */
+export function envWebOverride(): boolean | null {
+  const raw = process.env.NAN_WEB?.trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") {
+    return false;
+  }
+  if (raw === "1" || raw === "true" || raw === "on" || raw === "yes") {
+    return true;
+  }
+  return null;
+}
+
+/**
+ * Effective web tools flag.
+ * Precedence: NAN_WEB env → project .nan/settings.json → ~/.nan-agent/settings.json → true.
+ */
+export function isWebEnabled(workspace?: string): boolean {
+  const env = envWebOverride();
+  if (env !== null) return env;
+  if (workspace) {
+    const project = readSettingsFile(projectSettingsPath(workspace));
+    if (typeof project.webEnabled === "boolean") {
+      return project.webEnabled;
+    }
+  }
+  const user = readSettingsFile(userSettingsPath());
+  if (typeof user.webEnabled === "boolean") {
+    return user.webEnabled;
+  }
+  return true;
+}
+
+export function setWebEnabled(
+  enabled: boolean,
+  scope: MemorySettingsScope,
+  workspace?: string,
+): { file: string; enabled: boolean } {
+  if (scope === "project") {
+    if (!workspace) {
+      throw new Error("project scope requires a workspace path");
+    }
+    const file = projectSettingsPath(workspace);
+    writeSettingsFile(file, { webEnabled: enabled });
+    return { file, enabled };
+  }
+  const file = userSettingsPath();
+  writeSettingsFile(file, { webEnabled: enabled });
+  return { file, enabled };
+}
+
+export function toggleWebEnabled(
+  scope: MemorySettingsScope,
+  workspace?: string,
+): { file: string; enabled: boolean } {
+  const next = !isWebEnabled(workspace);
+  return setWebEnabled(next, scope, workspace);
 }
 
 /** Resolve a relative memory file under the project memory dir (no escape). */

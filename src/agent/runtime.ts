@@ -146,7 +146,20 @@ export class AgentRuntime {
       throw new Error("Cannot change mode while the agent is running.");
     }
     this.mode = mode;
-    this.tools = createRegistryForMode(mode);
+    this.tools = createRegistryForMode(mode, {
+      workspace: this.config.workspace,
+    });
+    this.refreshSystemPrompt();
+  }
+
+  /** Rebuild tool registry (e.g. after /web on|off). */
+  refreshTools(): void {
+    if (this.running) {
+      throw new Error("Cannot refresh tools while the agent is running.");
+    }
+    this.tools = createRegistryForMode(this.mode, {
+      workspace: this.config.workspace,
+    });
     this.refreshSystemPrompt();
   }
 
@@ -245,6 +258,7 @@ export class AgentRuntime {
       content: buildSystemPrompt({
         workspace: this.config.workspace,
         mode: this.mode,
+        webEnabled: this.tools.has("web_search") || this.tools.has("web_fetch"),
       }),
     };
     const rest = this.session.getMessages().filter((m) => m.role !== "system");

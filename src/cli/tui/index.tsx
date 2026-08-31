@@ -19,7 +19,7 @@ export interface TuiContext {
  */
 export async function runTui(ctx: TuiContext): Promise<void> {
   const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
+    exitOnCtrlC: false,
     targetFps: 30,
   });
 

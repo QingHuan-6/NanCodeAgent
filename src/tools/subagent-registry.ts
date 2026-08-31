@@ -2,6 +2,7 @@
  * Tool registries for child agents (no task / todo_write — avoids recursion & todo fights).
  */
 
+import { isWebEnabled } from "../memory/paths.js";
 import { askUserTool } from "./ask_user.js";
 import { bashTool } from "./bash.js";
 import { editFileTool } from "./edit_file.js";
@@ -18,14 +19,19 @@ import { writeFileTool } from "./write_file.js";
 
 export type SubagentType = "explorer" | "worker";
 
-export function createSubagentRegistry(type: SubagentType): ToolRegistry {
+export function createSubagentRegistry(
+  type: SubagentType,
+  workspace?: string,
+): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
   registry.register(globTool);
   registry.register(grepTool);
   registry.register(askUserTool);
-  registry.register(webFetchTool);
-  registry.register(webSearchTool);
+  if (isWebEnabled(workspace)) {
+    registry.register(webFetchTool);
+    registry.register(webSearchTool);
+  }
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);

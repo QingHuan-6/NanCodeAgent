@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
   AgentRuntime,
   formatContextBreakdown,
@@ -15,7 +15,13 @@ import type { AgentEvent } from "../../agent/events.js";
 import type { ContextEstimate } from "../../agent/tokens.js";
 import type { Config } from "../../config/index.js";
 import type { LlmClient } from "../../llm/client.js";
+import {
+  applyMemorySlash,
+  isWebEnabled,
+  parseMemorySlashArg,
+} from "../../memory/index.js";
 import { Session } from "../../session/session.js";
+import { resolveSessionId, shortSessionId } from "../../session/resolve-id.js";
 import {
   clearTodos,
   loadPersistedTodos,
@@ -23,13 +29,12 @@ import {
   type TodoItem,
 } from "../../session/todo.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import { filterSlashSuggestions } from "../slash-suggest.js";
 import { helpText, parseSlashCommand } from "../slash.js";
-import {
-  applyMemorySlash,
-  parseMemorySlashArg,
-} from "../../memory/index.js";
-import { theme } from "./theme.js";
+import { applyWebSlash, parseWebSlashArg } from "../web-slash.js";
+import { copyTextToClipboard } from "./clipboard.js";
 import { MarkdownView } from "./MarkdownView.js";
+import { theme } from "./theme.js";
 import { ToolCard } from "./ToolCard.js";
 import { ToolDetailPanel } from "./ToolDetail.js";
 import { timelineFromMessages } from "./resume-timeline.js";
@@ -58,6 +63,7 @@ export interface TuiAppProps {
  */
 export function TuiApp(props: TuiAppProps): ReactNode {
   const { onExit } = props;
+  const renderer = useRenderer();
   const { width, height } = useTerminalDimensions();
   const [config] = useState(props.config);
   const [llm] = useState(props.llm);
@@ -73,7 +79,7 @@ export function TuiApp(props: TuiAppProps): ReactNode {
     {
       id: nextId("sys"),
       kind: "system",
-      text: "OpenTUI · scroll wheel / sticky · ctrl+o tool · ctrl+p/n · /help",
+      text: "Type / for commands · ↑↓ select · Tab complete · Ctrl+C copy · Esc abort · /exit quit",
     },
   ]);
   const [focusedToolId, setFocusedToolId] = useState<string | null>(null);
@@ -81,6 +87,7 @@ export function TuiApp(props: TuiAppProps): ReactNode {
   const [streamBuffer, setStreamBuffer] = useState("");
   const [status, setStatus] = useState<StatusState>({ phase: "idle" });
   const [input, setInput] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [userQuestion, setUserQuestion] = useState<UserQuestionRequest | null>(
@@ -381,6 +388,19 @@ export function TuiApp(props: TuiAppProps): ReactNode {
 
   const toolIds = useMemo(() => tools.map((t) => t.id), [tools]);
 
+  const slashSuggestions = useMemo(
+    () => filterSlashSuggestions(input),
+    [input],
+  );
+
+  const focusedSlash = useMemo(() => {
+    if (slashSuggestions.length === 0) return null;
+    const idx =
+      ((slashIndex % slashSuggestions.length) + slashSuggestions.length) %
+      slashSuggestions.length;
+    return slashSuggestions[idx]!;
+  }, [slashSuggestions, slashIndex]);
+
   const focusedTool = useMemo(() => {
     if (focusedToolId) {
       const hit = tools.find((t) => t.id === focusedToolId);
@@ -456,6 +476,7 @@ export function TuiApp(props: TuiAppProps): ReactNode {
               `session:   ${session.id}`,
               `messages:  ${session.messageCount()}`,
               `mode:      ${runtime.mode}`,
+              `web:       ${isWebEnabled(config.workspace) ? "on" : "off"}`,
               `todos:     ${todos.length ? summarizeTodos(todos) : "(none)"}`,
               `model:     ${config.model}`,
               `workspace: ${config.workspace}`,
@@ -489,6 +510,31 @@ export function TuiApp(props: TuiAppProps): ReactNode {
           if (parsed.kind !== "status") {
             try {
               runtime.refreshSystemPrompt();
+            } catch (err) {
+              pushItem({
+                id: nextId("err"),
+                kind: "error",
+                text: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+          pushItem({ id: nextId("sys"), kind: "system", text });
+          return true;
+        }
+        case "web": {
+          const parsed = parseWebSlashArg(slash.arg ?? "");
+          if (parsed.kind === "error") {
+            pushItem({
+              id: nextId("sys"),
+              kind: "system",
+              text: parsed.message,
+            });
+            return true;
+          }
+          const text = applyWebSlash(config.workspace, parsed);
+          if (parsed.kind !== "status") {
+            try {
+              runtime.refreshTools();
             } catch (err) {
               pushItem({
                 id: nextId("err"),
@@ -575,7 +621,9 @@ export function TuiApp(props: TuiAppProps): ReactNode {
             text:
               ids.length === 0
                 ? "No saved sessions."
-                : `Sessions:\n${ids.map((id) => `  ${id}`).join("\n")}`,
+                : `Sessions (use short id with /resume):\n${ids
+                    .map((id) => `  ${shortSessionId(id)}  (${id})`)
+                    .join("\n")}`,
           });
           return true;
         }
@@ -592,14 +640,18 @@ export function TuiApp(props: TuiAppProps): ReactNode {
             pushItem({
               id: nextId("sys"),
               kind: "system",
-              text: "Usage: /resume <session-id>",
+              text: "Usage: /resume <id>  (full session-… or suffix; see /sessions)",
             });
             return true;
           }
           try {
-            const loaded = Session.loadFromJsonl(`sessions/${slash.id}.jsonl`, {
-              persistDir: "sessions",
-            });
+            const resolved = resolveSessionId(slash.id, "sessions");
+            const loaded = Session.loadFromJsonl(
+              `sessions/${resolved}.jsonl`,
+              {
+                persistDir: "sessions",
+              },
+            );
             setSession(loaded);
             runtimeRef.current = null;
             const restored =
@@ -660,6 +712,7 @@ export function TuiApp(props: TuiAppProps): ReactNode {
       const trimmed = raw.trim();
       if (!trimmed || permission || userQuestion) return;
       setInput("");
+      setSlashIndex(0);
       if (trimmed.startsWith("/")) {
         await handleSlash(trimmed);
         return;
@@ -669,8 +722,52 @@ export function TuiApp(props: TuiAppProps): ReactNode {
     [permission, userQuestion, handleSlash, runPrompt],
   );
 
+  const submitComposer = useCallback(() => {
+    if (
+      slashSuggestions.length > 0 &&
+      focusedSlash &&
+      !input.slice(1).includes(" ")
+    ) {
+      void submit(`/${focusedSlash.insert}`);
+      return;
+    }
+    void submit(input);
+  }, [slashSuggestions.length, focusedSlash, input, submit]);
+
   useKeyboard((key) => {
     if (key.eventType === "release") return;
+
+    if (key.ctrl && key.name === "c") {
+      key.preventDefault();
+      const selected = renderer.getSelection()?.getSelectedText()?.trim() ?? "";
+      if (selected) {
+        void copyTextToClipboard(selected, renderer).then((ok) => {
+          pushItem({
+            id: nextId("sys"),
+            kind: "system",
+            text: ok
+              ? `Copied ${selected.length} chars.`
+              : "Copy failed (clipboard unavailable).",
+          });
+        });
+        return;
+      }
+      if (busy) {
+        getRuntime().abort();
+        pushItem({
+          id: nextId("sys"),
+          kind: "system",
+          text: "Aborted.",
+        });
+        return;
+      }
+      pushItem({
+        id: nextId("sys"),
+        kind: "system",
+        text: "Ctrl+C copies selection. Use /exit to quit · Esc aborts when busy.",
+      });
+      return;
+    }
 
     if (permission) {
       if (key.name === "y") {
@@ -702,6 +799,27 @@ export function TuiApp(props: TuiAppProps): ReactNode {
         return;
       }
       return;
+    }
+
+    if (slashSuggestions.length > 0) {
+      if (key.name === "up") {
+        setSlashIndex((i) => i - 1);
+        key.preventDefault();
+        return;
+      }
+      if (key.name === "down") {
+        setSlashIndex((i) => i + 1);
+        key.preventDefault();
+        return;
+      }
+      if (key.name === "tab") {
+        if (focusedSlash) {
+          setInput(`/${focusedSlash.insert}`);
+          setSlashIndex(0);
+        }
+        key.preventDefault();
+        return;
+      }
     }
 
     if (key.ctrl && key.name === "o") {
@@ -760,7 +878,9 @@ export function TuiApp(props: TuiAppProps): ReactNode {
     ? "[y] allow · [n] deny"
     : userQuestion
       ? "Enter submit · Esc skip"
-      : "ctrl+o tool · ctrl+p/n · scroll sticky";
+      : slashSuggestions.length > 0
+        ? "↑↓ select · Tab complete · Enter run"
+        : "Ctrl+C copy · Esc abort · /help";
 
   return (
     <box
@@ -898,14 +1018,48 @@ export function TuiApp(props: TuiAppProps): ReactNode {
             paddingRight={1}
             flexDirection="column"
           >
+            {slashSuggestions.length > 0 ? (
+              <box flexDirection="column" marginBottom={1}>
+                {(() => {
+                  const maxVisible = 8;
+                  const clamped =
+                    ((slashIndex % slashSuggestions.length) +
+                      slashSuggestions.length) %
+                    slashSuggestions.length;
+                  const start = Math.max(
+                    0,
+                    Math.min(
+                      clamped - 3,
+                      slashSuggestions.length - maxVisible,
+                    ),
+                  );
+                  return slashSuggestions
+                    .slice(start, start + maxVisible)
+                    .map((s, i) => {
+                      const active = start + i === clamped;
+                      return (
+                        <text
+                          key={s.name}
+                          fg={active ? theme.brand : theme.dim}
+                        >
+                          {`${active ? "›" : " "} /${s.name.padEnd(10)} ${s.summary}`}
+                        </text>
+                      );
+                    });
+                })()}
+              </box>
+            ) : null}
             <input
               focused={composerFocused}
               value={input}
-              onInput={setInput}
-              onSubmit={() => {
-                void submit(input);
+              onInput={(v) => {
+                setInput(v);
+                setSlashIndex(0);
               }}
-              placeholder={busy ? "steer…" : "message…"}
+              onSubmit={() => {
+                submitComposer();
+              }}
+              placeholder={busy ? "steer…" : "message… or /"}
               width="100%"
             />
           </box>

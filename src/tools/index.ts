@@ -1,3 +1,8 @@
+/**
+ * Local tools registry builders.
+ */
+
+import { isWebEnabled } from "../memory/paths.js";
 import { askUserTool } from "./ask_user.js";
 import { bashTool } from "./bash.js";
 import { editFileTool } from "./edit_file.js";
@@ -16,6 +21,12 @@ import { writeFileTool } from "./write_file.js";
 
 export type AgentToolMode = "agent" | "plan";
 
+export interface RegistryOptions {
+  /** Include web_search / web_fetch (default: from settings / true). */
+  web?: boolean;
+  workspace?: string;
+}
+
 /** Plan mode: exploration + ask/search/lsp/skill/task(explorer)/memory (no write/edit/bash). */
 const PLAN_TOOLS = new Set([
   "read_file",
@@ -32,8 +43,13 @@ const PLAN_TOOLS = new Set([
   "memory",
 ]);
 
+function resolveWeb(options?: RegistryOptions): boolean {
+  if (typeof options?.web === "boolean") return options.web;
+  return isWebEnabled(options?.workspace);
+}
+
 /** Full tool set. */
-export function createDefaultRegistry(): ToolRegistry {
+export function createDefaultRegistry(options?: RegistryOptions): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
   registry.register(writeFileTool);
@@ -43,8 +59,10 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(grepTool);
   registry.register(todoWriteTool);
   registry.register(askUserTool);
-  registry.register(webFetchTool);
-  registry.register(webSearchTool);
+  if (resolveWeb(options)) {
+    registry.register(webFetchTool);
+    registry.register(webSearchTool);
+  }
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);
@@ -53,15 +71,17 @@ export function createDefaultRegistry(): ToolRegistry {
   return registry;
 }
 
-export function createPlanRegistry(): ToolRegistry {
+export function createPlanRegistry(options?: RegistryOptions): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
   registry.register(globTool);
   registry.register(grepTool);
   registry.register(todoWriteTool);
   registry.register(askUserTool);
-  registry.register(webFetchTool);
-  registry.register(webSearchTool);
+  if (resolveWeb(options)) {
+    registry.register(webFetchTool);
+    registry.register(webSearchTool);
+  }
   registry.register(lspTool);
   registry.register(skillTool);
   registry.register(skillInstallTool);
@@ -70,8 +90,13 @@ export function createPlanRegistry(): ToolRegistry {
   return registry;
 }
 
-export function createRegistryForMode(mode: AgentToolMode): ToolRegistry {
-  return mode === "plan" ? createPlanRegistry() : createDefaultRegistry();
+export function createRegistryForMode(
+  mode: AgentToolMode,
+  options?: RegistryOptions,
+): ToolRegistry {
+  return mode === "plan"
+    ? createPlanRegistry(options)
+    : createDefaultRegistry(options);
 }
 
 export function isPlanTool(name: string): boolean {
